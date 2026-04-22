@@ -1,111 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500;1,600&display=swap');
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
-
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
-
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  --or: #E67E22;
+  --or-d: #C0621A;
+  --or-l: #F0944A;
+  --or-bg: rgba(230,126,34,0.09);
+  --carbon: #2D3436;
+  --slate: #636E72;
+  --slate-l: #8A9298;
+  --slate-bg: #3D4347;
+  --cream: #FFF8F0;
+  --white: #FFFFFF;
+  --surface: #F9F4EE;
+  --border: #E6DDD0;
+  --green: #27AE60;
+  --green-bg: rgba(39,174,96,0.1);
+  --blue: #2980B9;
+  --blue-bg: rgba(41,128,185,0.08);
+  --red: #C0392B;
+  --red-bg: rgba(192,57,43,0.08);
+  --teal: #16A085;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+@theme {
+  --color-sipo-orange: var(--or);
+  --color-sipo-orange-dark: var(--or-d);
+  --color-sipo-orange-light: var(--or-l);
+  --color-sipo-orange-bg: var(--or-bg);
+  --color-sipo-carbon: var(--carbon);
+  --color-sipo-slate: var(--slate);
+  --color-sipo-slate-light: var(--slate-l);
+  --color-sipo-slate-bg: var(--slate-bg);
+  --color-sipo-cream: var(--cream);
+  --color-sipo-surface: var(--surface);
+  --color-sipo-border: var(--border);
+  --color-sipo-green: var(--green);
+  --color-sipo-green-bg: var(--green-bg);
+  --color-sipo-blue: var(--blue);
+  --color-sipo-blue-bg: var(--blue-bg);
+  --color-sipo-red: var(--red);
+  --color-sipo-red-bg: var(--red-bg);
+  
+  --font-barlow: 'Barlow Condensed', sans-serif;
+  --font-dmsans: 'DM Sans', sans-serif;
 }
 
 body {
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 300;
+  font-size: 14px;
+  background-color: var(--surface);
+  color: var(--carbon);
   margin: 0;
 }
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
+h1, h2, h3, h4, .font-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--slate);
+  font-weight: 600;
 }
 
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
+@layer utilities {
+  .glass {
+    @apply bg-white/20 backdrop-blur-lg border border-white/30 shadow-lg;
   }
 }
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s ease-out forwards;
 }
