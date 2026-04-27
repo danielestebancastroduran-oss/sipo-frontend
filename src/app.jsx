@@ -15,10 +15,12 @@ import Step5Presupuesto from './pages/Obras/CreationFlow/Step5Presupuesto';
 // Componente para proteger rutas
 const ProtectedRoute = () => {
   const token = localStorage.getItem('token');
+  console.log("🛡️ [DEBUG] ProtectedRoute - Token:", token ? "Existente" : "MISSING");
   return token ? <DashboardLayout><Outlet /></DashboardLayout> : <Navigate to="/login" />;
 };
 
 function App() {
+  console.log("📍 [DEBUG] App.jsx renderizado en path:", window.location.pathname);
   return (
     <Router>
       <Routes>

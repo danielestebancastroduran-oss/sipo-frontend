@@ -442,7 +442,7 @@ const Step3APU = () => {
                         <td className="px-4 py-2 w-32"><input type="number" className="w-full p-2 rounded text-right" value={newItem.precio} onChange={e => setNewItem({...newItem, precio: e.target.value})} /></td>
                         <td className="px-4 py-2 text-right font-bold">{formatCOP(newItem.cantidad * newItem.precio)}</td>
                         <td className="px-4 py-2 flex gap-2">
-                           <button onClick={() => handleAddItem('herramienta')} className="p-2 text-sipo-green"><Check size={18}/></button>
+                           <button onClick={() => handleAddItem('herramientas')} className="p-2 text-sipo-green"><Check size={18}/></button>
                            <button onClick={() => setNewItem({tipo:null})} className="p-2 text-sipo-red"><X size={18}/></button>
                         </td>
                       </tr>

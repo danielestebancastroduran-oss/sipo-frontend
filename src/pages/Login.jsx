@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2 } from 'lucide-react';
 import { authFetch } from '../services/apiFetch'; // Importamos tu nuevo motor
 
 const Login = () => {
+  console.log("🔑 [DEBUG] Renderizando Login Page");
   const [formData, setFormData] = useState({ correo: '', password: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,7 +35,10 @@ const Login = () => {
       if (data && data.success) {
         // Guardamos el token y los datos de usuario
         localStorage.setItem('token', data.data.token);
-        localStorage.setItem('user', JSON.stringify(data.data));
+        // Aseguramos que el ID se guarde explícitamente
+        const userData = data.data.user || data.data;
+        localStorage.setItem('user', JSON.stringify(userData));
+        console.log("🛡️ [DEBUG] Usuario guardado en localStorage:", userData);
         
         // Redirigimos al dashboard
         navigate('/dashboard');
@@ -43,8 +47,8 @@ const Login = () => {
       }
     } catch (err) {
       console.error('Error en login:', err);
-      // Aquí capturamos el error si authFetch lanza un throw new Error
-      setError('Error de conexión con el servidor. Verifica que esté corriendo.');
+      // Mostramos el mensaje específico del backend si existe
+      setError(err.message || 'Error de conexión con el servidor. Verifica que esté corriendo.');
     } finally {
       setLoading(false);
     }

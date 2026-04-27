@@ -31,6 +31,11 @@ const Step2Partidas = () => {
   };
 
   useEffect(() => {
+    if (!id || id === 'nueva') {
+      console.warn("⚠️ [DEBUG] ID inválido en Step 2, redirigiendo a Step 1");
+      navigate('/obras/nueva');
+      return;
+    }
     fetchData();
   }, [id]);
 
@@ -155,11 +160,47 @@ const Step2Partidas = () => {
               <button onClick={() => setShowModal(false)}><X /></button>
             </div>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <input type="text" placeholder="Nombre" className="w-full p-3 border rounded-xl" required value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} />
-              <input type="text" placeholder="Unidad" className="w-full p-3 border rounded-xl" required value={formData.unidad} onChange={e => setFormData({ ...formData, unidad: e.target.value })} />
-              <input type="number" placeholder="Cantidad" className="w-full p-3 border rounded-xl" required value={formData.cantidad} onChange={e => setFormData({ ...formData, cantidad: e.target.value })} />
-              <input type="number" placeholder="Valor Unitario" className="w-full p-3 border rounded-xl" required value={formData.valor_unitario} onChange={e => setFormData({ ...formData, valor_unitario: e.target.value })} />
-              <button type="submit" className="w-full bg-orange-500 text-white py-3 rounded-xl font-bold">Guardar</button>
+              <div>
+                <label className="text-[10px] uppercase font-bold text-gray-400">Nombre de la partida</label>
+                <input type="text" placeholder="Ej. Mampostería de ladrillo" className="w-full mt-1 p-3 border rounded-xl" required value={formData.nombre} onChange={e => setFormData({ ...formData, nombre: e.target.value })} />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-gray-400">Unidad</label>
+                  <select 
+                    className="w-full mt-1 p-3 border rounded-xl bg-white" 
+                    required 
+                    value={formData.unidad} 
+                    onChange={e => setFormData({ ...formData, unidad: e.target.value })}
+                  >
+                    <option value="m2">m2 (Metro Cuadrado)</option>
+                    <option value="m3">m3 (Metro Cúbico)</option>
+                    <option value="ml">ml (Metro Lineal)</option>
+                    <option value="kg">kg (Kilogramo)</option>
+                    <option value="und">und (Unidad)</option>
+                    <option value="glb">glb (Global)</option>
+                    <option value="pto">pto (Punto)</option>
+                    <option value="ton">ton (Tonelada)</option>
+                    <option value="m">m (Metro)</option>
+                    <option value="mes">mes (Mes)</option>
+                    <option value="dia">dia (Día)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-gray-400">Cantidad</label>
+                  <input type="number" step="0.01" placeholder="0.00" className="w-full mt-1 p-3 border rounded-xl" required value={formData.cantidad} onChange={e => setFormData({ ...formData, cantidad: e.target.value })} />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] uppercase font-bold text-gray-400">Valor Unitario (Estimado)</label>
+                <input type="number" placeholder="0" className="w-full mt-1 p-3 border rounded-xl font-bold text-orange-600" required value={formData.valor_unitario} onChange={e => setFormData({ ...formData, valor_unitario: e.target.value })} />
+              </div>
+              
+              <button type="submit" className="w-full bg-orange-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-orange-200 active:scale-95 transition-all mt-4">
+                {isEditing ? 'Actualizar Partida' : 'Crear Partida'}
+              </button>
             </form>
           </div>
         </div>

@@ -13,7 +13,8 @@ import {
   Trash2,
   CheckCircle2,
   Loader2,
-  X
+  X,
+  Edit3
 } from 'lucide-react';
 import { formatCOP, parseNum } from '../utils/format';
 import Toast from '../components/Toast';
@@ -144,6 +145,8 @@ const Configuracion = () => {
     const payload = {
       usuario_id: user.id,
       nombre: nombreVal,
+      descripcion: formData.get('descripcion')?.trim() || '',
+      costo_diario: Number(formData.get('costo_diario')) || 0,
       ...(rendimientoVal ? { rendimiento_base: Number(rendimientoVal) } : {})
     };
 
@@ -334,8 +337,12 @@ const Configuracion = () => {
                         <div className="flex justify-between items-start mb-4">
                            <h4 className="font-bold text-sipo-carbon">{c.nombre}</h4>
                            <div className="flex gap-2">
-                             <button className="text-sipo-blue p-1" onClick={() => { setEditingCrew(c); setShowCrewModal(true); }}><Save size={16}/></button>
-                             <button className="text-sipo-red p-1" onClick={() => handleDeleteCrew(c.id)}><Trash2 size={16}/></button>
+                             <button className="text-sipo-blue p-1 hover:bg-sipo-blue-bg rounded-md transition-colors" onClick={() => { setEditingCrew(c); setShowCrewModal(true); }} title="Editar">
+                               <Edit3 size={18}/>
+                             </button>
+                             <button className="text-sipo-red p-1 hover:bg-sipo-red-bg rounded-md transition-colors" onClick={() => handleDeleteCrew(c.id)} title="Eliminar">
+                               <Trash2 size={18}/>
+                             </button>
                            </div>
                         </div>
                         <p className="text-xs text-sipo-slate mb-4 line-clamp-2">{c.descripcion}</p>
@@ -479,6 +486,27 @@ const Configuracion = () => {
                   defaultValue={editingCrew?.nombre}
                   required
                   placeholder="Ej. Cuadrilla de mampostería"
+                  className="w-full mt-2 p-3 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none font-medium text-sm"
+                />
+              </div>
+              <div>
+                <label>Descripción <span className="text-sipo-slate text-xs">(opcional)</span></label>
+                <textarea
+                  name="descripcion"
+                  defaultValue={editingCrew?.descripcion}
+                  placeholder="Ej. Personal encargado de muros y acabados"
+                  className="w-full mt-2 p-3 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none font-medium text-sm resize-none"
+                  rows="2"
+                />
+              </div>
+              <div>
+                <label>Costo Diario (Sueldo)</label>
+                <input
+                  name="costo_diario"
+                  type="number"
+                  defaultValue={editingCrew?.costo_diario || 0}
+                  required
+                  placeholder="Ej. 120000"
                   className="w-full mt-2 p-3 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none font-medium text-sm"
                 />
               </div>

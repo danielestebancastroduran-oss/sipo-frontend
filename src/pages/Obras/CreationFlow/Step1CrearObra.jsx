@@ -33,6 +33,68 @@ const Step1CrearObra = () => {
   const [isNewClient, setIsNewClient] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState('');
 
+  // 0. Cargar datos si hay un ID (Modo Edición)
+  useEffect(() => {
+    const fetchObraExistente = async () => {
+      if (!id || id === 'nueva') {
+        // LIMPIEZA: Si es nueva, asegurarnos de que no haya restos de obras anteriores
+        localStorage.removeItem('obraActivaId');
+        return;
+      }
+      setLoading(true);
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch(`http://localhost:3000/api/obras/${id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const responseData = await res.json();
+        if (responseData.success) {
+          const o = responseData.data;
+          setFormData({
+            tipo: o.tipo || 'residencial',
+            nombre: o.nombre || '',
+            municipio_id: o.municipio_id || '',
+            departamento_id: o.departamento_id || '',
+            fecha_inicio: o.fecha_inicio ? o.fecha_inicio.split('T')[0] : '',
+            descripcion: o.descripcion || '',
+            cliente_nombre: o.cliente?.nombre || '',
+            cliente_nit: o.cliente?.nit || '',
+            cliente_correo: o.cliente?.correo || '',
+            cliente_telefono: o.cliente?.telefono || ''
+          });
+          if (o.cliente_id) setSelectedClientId(o.cliente_id);
+        }
+      } catch (err) {
+        console.error('Error cargando obra para edición:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchObraExistente();
+  }, [id]);
+
+  // 0.1 Cargar borrador de localStorage al iniciar (solo si es obra NUEVA)
+  useEffect(() => {
+    if (!id) {
+      const draft = localStorage.getItem('sipo_obra_draft');
+      if (draft) {
+        try {
+          const parsedDraft = JSON.parse(draft);
+          setFormData(prev => ({ ...prev, ...parsedDraft }));
+        } catch (err) {
+          console.error('Error al cargar el borrador:', err);
+        }
+      }
+    }
+  }, [id]);
+
+  // 0.1 Guardar borrador en localStorage cada vez que formData cambie
+  useEffect(() => {
+    if (!id && formData.nombre) {
+      localStorage.setItem('sipo_obra_draft', JSON.stringify(formData));
+    }
+  }, [formData, id]);
+
   // 1. Cargar departamentos al montar el componente
   useEffect(() => {
     const fetchDepartamentos = async () => {
@@ -193,12 +255,13 @@ const Step1CrearObra = () => {
         estado: 'borrador'
       };
 
-      const url = id 
+      const isEditing = id && id !== 'nueva';
+      const url = isEditing 
         ? `http://localhost:3000/api/obras/${id}` 
         : 'http://localhost:3000/api/obras';
 
       const res = await fetch(url, {
-        method: id ? 'PUT' : 'POST',
+        method: isEditing ? 'PUT' : 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
@@ -208,6 +271,7 @@ const Step1CrearObra = () => {
 
       const data = await res.json();
       if (data.success) {
+        localStorage.removeItem('sipo_obra_draft'); // Limpiar borrador al guardar exitosamente
         localStorage.setItem('obraActivaId', data.data.id);
         navigate(`/obras/${data.data.id}/partidas`);
       } else {

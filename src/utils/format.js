@@ -17,5 +17,18 @@ export const formatCOP = (value) => {
  * Useful for calculations to avoid NaN.
  */
 export const parseNum = (value) => {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'string') {
+    // Si tiene puntos y comas (ej: 1.200,50), quitamos puntos y cambiamos coma por punto
+    if (value.includes('.') && value.includes(',')) {
+      return Number(value.replace(/\./g, '').replace(',', '.')) || 0;
+    }
+    // Si solo tiene puntos y son 3 cifras después (ej: 1.000), es probable que sea miles
+    if (value.includes('.') && value.split('.').pop().length === 3) {
+      return Number(value.replace(/\./g, '')) || 0;
+    }
+    // Caso estándar
+    return Number(value.replace(',', '.')) || 0;
+  }
   return Number(value) || 0;
 };

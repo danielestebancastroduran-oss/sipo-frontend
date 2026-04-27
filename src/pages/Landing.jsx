@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 
 const Landing = () => {
+  console.log("🏠 [DEBUG] Renderizando Landing Page");
   return (
     <div className="min-h-screen bg-sipo-cream">
       {/* Navigation */}

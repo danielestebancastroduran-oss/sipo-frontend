@@ -30,11 +30,16 @@ export const authFetch = async (endpoint, options = {}) => {
   // 4. Depuración de respuesta
   console.log("🔍 [DEBUG API] Estado de respuesta:", response.status);
 
+  const data = await response.json();
+
   // 5. Manejo de error
   if (!response.ok) {
-    console.error(`❌ [DEBUG API] La petición falló con status: ${response.status}`);
-    throw new Error(`Error ${response.status}`);
+    console.error(`❌ [DEBUG API] La petición falló con status: ${response.status}`, data);
+    // Lanzamos un objeto con el mensaje del backend si existe
+    const error = new Error(data.message || `Error ${response.status}`);
+    error.data = data;
+    throw error;
   }
 
-  return response.json();
+  return data;
 };

@@ -20,18 +20,39 @@ const ObrasList = () => {
 
   useEffect(() => {
     const fetchData = async () => {
+      console.log("🔍 [RENDER] ObrasList - Estado actual obras:", obras.length);
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      console.log("👤 [USER] ID buscado:", currentUser?.id);
+      
+      if (!currentUser?.id) {
+        setLoading(false);
+        return;
+      }
+
       try {
-        const response = await fetch(`http://localhost:3000/api/obras/usuario/${user.id}`);
+        const token = localStorage.getItem('token');
+        console.log("🌐 [FETCH] Llamando a API...");
+        const response = await fetch(`http://localhost:3000/api/obras/usuario/${currentUser.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        console.log("📡 [STATUS]:", response.status);
         const data = await response.json();
-        if (data.success) setObras(data.data || []);
+        console.log("📦 [DATA RECEIVED]:", data);
+        
+        if ((data.success || data.data) && Array.isArray(data.data)) {
+          console.log("✅ [SUCCESS] Obras a setear:", data.data.length);
+          setObras([...data.data]);
+        } else {
+          console.log("⚠️ [WARN] Backend respondió con formato inesperado:", data);
+        }
       } catch (err) {
-        console.error('Error cargando obras:', err);
+        console.error('❌ [ERROR] Fallo carga:', err);
       } finally {
         setLoading(false);
       }
     };
-    if (user.id) fetchData();
-  }, [user.id]);
+    fetchData();
+  }, []); // Solo al montar
 
   const formatCOP = (val) => {
     if (isNaN(val) || val === null) return '$0';
@@ -49,9 +70,9 @@ const ObrasList = () => {
     return 'bg-amber-50 text-amber-600 border-amber-200';
   };
 
-  const filteredObras = obras.filter(o => 
-    o.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    o.cliente?.nombre?.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredObras = (obras || []).filter(o => 
+    (o.nombre || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (o.cliente?.nombre || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
@@ -90,12 +111,16 @@ const ObrasList = () => {
         </select>
       </div>
 
+      <div className="bg-sipo-orange/10 p-2 rounded text-xs font-bold text-sipo-orange mb-4">
+        DEBUG: {obras.length} obras encontradas en memoria.
+      </div>
+
       {loading ? (
         <div className="py-20 flex flex-col items-center gap-4">
           <Loader2 className="animate-spin text-sipo-orange" size={40} />
           <p className="text-sipo-slate font-medium">Sincronizando con el servidor...</p>
         </div>
-      ) : filteredObras.length === 0 ? (
+      ) : (obras || []).length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-sipo-border">
            <div className="w-20 h-20 bg-sipo-surface rounded-full flex items-center justify-center mb-4">
             <Building2 size={32} className="text-sipo-slate-light" />
@@ -119,10 +144,10 @@ const ObrasList = () => {
               <div className="space-y-4">
                 <div>
                   <h3 className="font-barlow font-bold text-xl text-sipo-carbon italic uppercase line-clamp-1 group-hover:text-sipo-orange transition-colors">
-                    {obra.nombre}
+                    {obra.nombre || 'PROYECTO SIN NOMBRE'}
                   </h3>
                   <p className="text-[11px] uppercase tracking-wider text-sipo-slate font-bold mt-1">
-                    {obra.cliente?.nombre || 'Sin cliente identificado'}
+                    {obra.cliente?.nombre || 'CLIENTE NO DEFINIDO'}
                   </p>
                 </div>
 

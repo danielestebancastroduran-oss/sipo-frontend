@@ -8,7 +8,8 @@ import {
   Calculator,
   ChevronLeft,
   Loader2,
-  X
+  X,
+  Check
 } from 'lucide-react';
 import TabProgreso from '../../../components/TabProgreso';
 import { formatCOP, parseNum } from '../../../utils/format';
@@ -32,17 +33,40 @@ const Step4Costos = () => {
     utilidad: 10
   });
 
+  // Configuración Fiscal
+  const [fiscalConfig, setFiscalConfig] = useState({
+    iva_porcentaje: 19,
+    ica_porcentaje: 0.966,
+    reteica_porcentaje: 0,
+    retencion_fuente: 0
+  });
+
   useEffect(() => {
-    if (id) localStorage.setItem('obraActivaId', id);
-    fetchData();
+    if (id && id !== 'nueva') {
+      localStorage.setItem('obraActivaId', id);
+      fetchData();
+    } else {
+      // Si es una obra nueva, resetear estados para no ver datos viejos
+      setCostoDirecto(0);
+      setAdminItems([]);
+      setLoading(false);
+    }
   }, [id]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
       
+      if (!id || id === 'nueva') {
+        setLoading(false);
+        return;
+      }
+      
+      const token = localStorage.getItem('token');
+      const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
+
       // Cargar partidas para calcular costo directo
-      const partidasRes = await fetch(`http://localhost:3000/api/obras/${id}/partidas`);
+      const partidasRes = await fetch(`http://localhost:3000/api/obras/${id}/partidas`, { headers });
       const partidasData = await partidasRes.json();
       
       if (partidasData.success) {
@@ -54,7 +78,7 @@ const Step4Costos = () => {
       }
 
       // Cargar costos indirectos por separado
-      const costosRes = await fetch(`http://localhost:3000/api/obras/${id}/costos`);
+      const costosRes = await fetch(`http://localhost:3000/api/obras/${id}/costos`, { headers });
       const costosData = await costosRes.json();
       
       if (costosData.success && costosData.data) {
@@ -68,6 +92,15 @@ const Step4Costos = () => {
           utilidad: util?.porcentaje || 10
         });
       }
+      // Cargar configuración fiscal del usuario
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      if (user.id) {
+        const fiscalRes = await fetch(`http://localhost:3000/api/configuracion-fiscal/usuario/${user.id}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const fiscalData = await fiscalRes.json();
+        if (fiscalData.success) setFiscalConfig(fiscalData.data);
+      }
     } catch (err) {
       console.error('Error cargando datos:', err);
     } finally {
@@ -78,10 +111,17 @@ const Step4Costos = () => {
   const saveNewItem = async () => {
     if (!newItem.concepto) return setIsAdding(false);
     try {
+      const token = localStorage.getItem('token');
       const res = await fetch(`http://localhost:3000/api/obras/${id}/costos/admin`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newItem)
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          descripcion: newItem.concepto,
+          valor: parseNum(newItem.valor)
+        })
       });
       const data = await res.json();
       if (data.success) {
@@ -97,8 +137,10 @@ const Step4Costos = () => {
   const removeAdminItem = async (itemId) => {
     if (!window.confirm('¿Eliminar este concepto?')) return;
     try {
+      const token = localStorage.getItem('token');
       const res = await fetch(`http://localhost:3000/api/obras/${id}/costos/admin/${itemId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
       });
       const data = await res.json();
       if (data.success) fetchData();
@@ -109,9 +151,13 @@ const Step4Costos = () => {
 
   const updateAIU = async () => {
     try {
+      const token = localStorage.getItem('token');
       await fetch(`http://localhost:3000/api/obras/${id}/costos`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(porcentajes)
       });
       fetchData(); // Recargar para ver el impacto en presupuesto_total
@@ -122,9 +168,13 @@ const Step4Costos = () => {
 
   const handleUpdateItem = async (item) => {
     try {
+      const token = localStorage.getItem('token');
       const res = await fetch(`http://localhost:3000/api/obras/${id}/costos/admin`, {
-        method: 'POST', // Usamos el mismo endpoint de admin que maneja upsert o similar en el backend
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify(item)
       });
       if (res.ok) {
@@ -134,16 +184,34 @@ const Step4Costos = () => {
     } catch (err) { console.error(err); }
   };
 
-  // Cálculos en tiempo real basándose en lo que viene del backend
-  const totalAdministracion = adminItems.reduce((sum, item) => sum + (Number(item.valor) || 0), 0);
-  const valorImprevistos = costoDirecto * (porcentajes.imprevistos / 100);
-  const valorUtilidad = costoDirecto * (porcentajes.utilidad / 100);
-  const presupuestoTotal = costoDirecto + totalAdministracion + valorImprevistos + valorUtilidad;
+  // Cálculos en tiempo real basándose en lo que viene del backend y config fiscal
+  const totalAdministracion = (adminItems || []).reduce((sum, item) => sum + (Number(item.valor) || 0), 0);
+  const cd = Number(costoDirecto) || 0;
+  const pImp = Number(porcentajes?.imprevistos) || 0;
+  const pUtil = Number(porcentajes?.utilidad) || 0;
+
+  const valorImprevistos = cd * (pImp / 100);
+  const valorUtilidad = cd * (pUtil / 100);
+  
+  // Lógica fiscal
+  const ivaSobreUtilidad = valorUtilidad * ((fiscalConfig?.iva_porcentaje || 19) / 100);
+  const totalSinRetenciones = cd + totalAdministracion + valorImprevistos + valorUtilidad + ivaSobreUtilidad;
+  
+  const valorICA = totalSinRetenciones * ((fiscalConfig?.ica_porcentaje || 0) / 1000);
+  const valorReteICA = valorICA * ((fiscalConfig?.reteica_porcentaje || 0) / 100);
+  const valorRetefuente = totalSinRetenciones * ((fiscalConfig?.retencion_fuente || 0) / 100);
+
+  const presupuestoTotal = totalSinRetenciones;
+
+  console.log("🔍 [DEBUG] Renderizando Step4Costos", { cd, totalAdministracion, presupuestoTotal });
 
   if (loading) return <div className="py-20 flex justify-center"><Loader2 className="animate-spin text-sipo-orange" size={40} /></div>;
+  if (!costoDirecto && adminItems.length === 0) {
+     // No mostramos error aún porque puede ser una obra nueva, pero si no hay partidas avisamos
+  }
 
   return (
-    <div className="animate-fade-in pb-20">
+    <div className="pb-20">
       <TabProgreso currentStep={4} />
 
       <div className="max-w-[1200px] mx-auto space-y-8">
@@ -348,6 +416,22 @@ const Step4Costos = () => {
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-sipo-slate-light">Utilidad ({porcentajes.utilidad}%)</span>
                   <span className="text-sipo-cream font-medium">{formatCOP(valorUtilidad)}</span>
+                </div>
+
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-sipo-slate-light">IVA s/ Utilidad ({fiscalConfig?.iva_porcentaje || 0}%)</span>
+                  <span className="text-sipo-cream font-medium">{formatCOP(ivaSobreUtilidad)}</span>
+                </div>
+                
+                <div className="pt-4 mt-4 border-t border-white/5 space-y-2">
+                   <div className="flex justify-between items-center text-[11px]">
+                     <span className="text-gray-400">ICA Est. ({fiscalConfig?.ica_porcentaje || 0}‰)</span>
+                     <span className="text-gray-300">-{formatCOP(valorICA)}</span>
+                   </div>
+                   <div className="flex justify-between items-center text-[11px]">
+                     <span className="text-gray-400">ReteFuente Est. ({fiscalConfig?.retencion_fuente || 0}%)</span>
+                     <span className="text-gray-300">-{formatCOP(valorRetefuente)}</span>
+                   </div>
                 </div>
 
                 <div className="pt-6 mt-6 border-t border-white/10 flex flex-col items-center gap-2">
