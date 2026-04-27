@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { CheckCircle2, Loader2 } from 'lucide-react';
+import { authFetch } from '../services/apiFetch'; // Importamos tu nuevo motor
 
 const Login = () => {
   const [formData, setFormData] = useState({ correo: '', password: '' });
@@ -18,39 +20,42 @@ const Login = () => {
     setError('');
 
     try {
-      const response = await fetch('http://localhost:3000/api/usuarios/login', {
+      // Usamos authFetch para el login
+      const data = await authFetch('/usuarios/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           correo: formData.correo,
           password: formData.password
-        }),
+        })
       });
 
-      const data = await response.json();
+      console.log("Respuesta del servidor:", data);
 
-      if (response.ok && data.success) {
+      if (data && data.success) {
+        // Guardamos el token y los datos de usuario
         localStorage.setItem('token', data.data.token);
         localStorage.setItem('user', JSON.stringify(data.data));
+        
+        // Redirigimos al dashboard
         navigate('/dashboard');
       } else {
-        setError(data.message || 'Error al iniciar sesión. Verifica tus credenciales.');
+        setError(data.message || 'Error al iniciar sesión.');
       }
     } catch (err) {
-      setError('Error de conexión con el servidor.');
+      console.error('Error en login:', err);
+      // Aquí capturamos el error si authFetch lanza un throw new Error
+      setError('Error de conexión con el servidor. Verifica que esté corriendo.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
+    // ... (Tu código JSX se mantiene IGUAL, no necesitas cambiar nada abajo)
+    // ... dentro de tu Login.jsx, asegúrate de que el contenedor principal tenga esto:
     <div className="min-h-screen flex items-center justify-center bg-sipo-cream p-4">
       <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl p-8 border border-gray-100 relative overflow-hidden">
-        {/* Decorative corner */}
         <div className="absolute top-0 right-0 w-24 h-24 bg-sipo-orange/5 rounded-bl-full"></div>
-        
         <div className="text-center mb-10">
           <Link to="/" className="inline-flex items-center gap-2 mb-6 group">
             <div className="w-10 h-10 bg-sipo-orange rounded-lg flex items-center justify-center font-bold text-white group-hover:scale-110 transition-transform">S</div>
@@ -59,62 +64,57 @@ const Login = () => {
           <h2 className="text-3xl font-extrabold text-sipo-charcoal">¡Bienvenido de nuevo!</h2>
           <p className="text-gray-500 mt-2">Ingresa tus credenciales para acceder</p>
         </div>
-
-        {error && (
-          <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 text-sm font-medium border border-red-100 animate-shake">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Formulario */}
+        {error && <div className="mb-4 p-3 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm text-center animate-fade-in">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">Correo Electrónico</label>
-            <input
-              type="email"
-              name="correo"
-              required
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-sipo-orange outline-none transition-all"
-              placeholder="nombre@ejemplo.com"
-              value={formData.correo}
-              onChange={handleChange}
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Correo Electrónico</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></span>
+              <input 
+                type="email" 
+                name="correo" 
+                value={formData.correo} 
+                onChange={handleChange} 
+                required
+                className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 focus:border-sipo-orange focus:ring-sipo-orange/20 outline-none transition-all"
+                placeholder="[EMAIL_ADDRESS]"
+              />
+            </div>
           </div>
-
           <div>
-            <label className="block text-sm font-bold text-gray-700 mb-2">Contraseña</label>
-            <input
-              type="password"
-              name="password"
-              required
-              className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:border-sipo-orange outline-none transition-all"
-              placeholder="••••••••"
-              value={formData.password}
-              onChange={handleChange}
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Contraseña</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></span>
+              <input 
+                type="password" 
+                name="password" 
+                value={formData.password} 
+                onChange={handleChange} 
+                required
+                className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 focus:border-sipo-orange focus:ring-sipo-orange/20 outline-none transition-all"
+                placeholder="••••••••"
+              />
+            </div>
           </div>
-
-          <button
-            type="submit"
+          <button 
+            type="submit" 
             disabled={loading}
-            className="w-full bg-sipo-charcoal text-white py-4 rounded-xl font-bold text-lg hover:bg-black transition-all shadow-lg active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full bg-sipo-orange hover:bg-sipo-orange-dark text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:shadow-xl active:scale-[0.98] disabled:opacity-70 flex items-center justify-center gap-2 mt-6"
           >
             {loading ? (
-              <>
-                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Iniciando sesión...
-              </>
-            ) : 'Iniciar Sesión'}
+              <><Loader2 className="animate-spin" size={20} /> Iniciando sesión...</>
+            ) : (
+              <><CheckCircle2 size={20} /> Entrar al Sistema</>
+            )}
           </button>
         </form>
-
-        <div className="mt-8 text-center text-gray-600 text-sm">
-          ¿No tienes una cuenta?{' '}
-          <Link to="/register" className="text-sipo-orange font-bold hover:underline">
-            Regístrate aquí
-          </Link>
+        {/* Footer */}
+        <div className="mt-8 text-center">
+          <p className="text-gray-500 text-sm">
+            ¿No tienes una cuenta? 
+            <Link to="/register" className="text-sipo-orange font-bold hover:text-sipo-orange-dark ml-2 transition-colors">Regístrate aquí</Link>
+          </p>
         </div>
       </div>
     </div>

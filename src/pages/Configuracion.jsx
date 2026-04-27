@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+
 import { 
   Briefcase, 
   Users, 
@@ -58,22 +59,29 @@ const Configuracion = () => {
   useEffect(() => {
     const fetchData = async () => {
       const user = JSON.parse(localStorage.getItem('user') || '{}');
-      if (!user.id) return;
-      
+      const token = localStorage.getItem('token');
+      if (!user.id || !token) return;
+
+      const authHeader = { 'Authorization': `Bearer ${token}` };
+
       try {
         setLoading(true);
         const [empRes, cuadRes, taxRes] = await Promise.all([
-          fetch(`http://localhost:3000/api/configuracion-empresa/usuario/${user.id}`),
-          fetch(`http://localhost:3000/api/cuadrillas/usuario/${user.id}`),
-          fetch(`http://localhost:3000/api/configuracion-fiscal/usuario/${user.id}`)
+          fetch(`http://localhost:3000/api/empresa-config/usuario/${user.id}`, { headers: authHeader }),
+          fetch(`http://localhost:3000/api/cuadrillas/usuario/${user.id}`, { headers: authHeader }),
+          fetch(`http://localhost:3000/api/configuracion-fiscal/usuario/${user.id}`, { headers: authHeader })
         ]);
 
         const empData = await empRes.json();
         const cuadData = await cuadRes.json();
         const taxData = await taxRes.json();
 
+        console.log('📥 Cuadrillas cargadas al inicio:', cuadData);
+
+        // Los endpoints GET de lista devuelven { data: [...], pagination: {} } SIN campo 'success'
+        // Los endpoints de un item devuelven { success: true, data: {...} }
         if (empData.success) setEmpresa(empData.data);
-        if (cuadData.success) setCuadrillas(cuadData.data || []);
+        if (Array.isArray(cuadData.data)) setCuadrillas(cuadData.data);
         if (taxData.success) setRetenciones(taxData.data);
       } catch (err) {
         console.error('Error cargando configuración:', err);
@@ -89,7 +97,7 @@ const Configuracion = () => {
     const user = JSON.parse(localStorage.getItem('user') || '{}');
     try {
       // Guardar Empresa
-      await fetch(`http://localhost:3000/api/configuracion-empresa/usuario/${user.id}`, {
+      await fetch(`http://localhost:3000/api/empresa-config/usuario/${user.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(empresa)
@@ -114,38 +122,78 @@ const Configuracion = () => {
 
   const handleCreateCrew = async (e) => {
     e.preventDefault();
+    const token = localStorage.getItem('token');
     const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+    if (!token || !user.id) {
+      alert('No estás autenticado. Inicia sesión nuevamente.');
+      return;
+    }
+
     const formData = new FormData(e.target);
+    const nombreVal = formData.get('nombre')?.trim();
+    const rendimientoVal = formData.get('rendimiento_base');
+
+    if (!nombreVal) {
+      alert('El nombre de la cuadrilla es requerido.');
+      return;
+    }
+
+    // Payload alineado con CuadrillaCreateSchema del backend:
+    // { usuario_id, nombre, rendimiento_base? }
     const payload = {
-      nombre: formData.get('nombre'),
-      descripcion: formData.get('descripcion'),
-      costo_diario: Number(formData.get('costo_diario')),
-      usuario_id: user.id
+      usuario_id: user.id,
+      nombre: nombreVal,
+      ...(rendimientoVal ? { rendimiento_base: Number(rendimientoVal) } : {})
+    };
+
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
     };
 
     try {
-      const url = editingCrew ? `http://localhost:3000/api/cuadrillas/${editingCrew.id}` : `http://localhost:3000/api/cuadrillas`;
+      const url = editingCrew
+        ? `http://localhost:3000/api/cuadrillas/${editingCrew.id}`
+        : `http://localhost:3000/api/cuadrillas`;
+
       const res = await fetch(url, {
         method: editingCrew ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders,
         body: JSON.stringify(payload)
       });
       const data = await res.json();
+      console.log('📥 Respuesta cuadrilla:', data);
+
       if (data.success) {
         setShowCrewModal(false);
         setEditingCrew(null);
-        // Refresh cuadrillas
-        const refresh = await fetch(`http://localhost:3000/api/cuadrillas/usuario/${user.id}`);
+        // Recargar lista con token
+        const refresh = await fetch(
+          `http://localhost:3000/api/cuadrillas/usuario/${user.id}`,
+          { headers: { 'Authorization': `Bearer ${token}` } }
+        );
         const rData = await refresh.json();
-        if (rData.success) setCuadrillas(rData.data);
+        // GET lista devuelve { data: [...] } sin 'success'
+        if (Array.isArray(rData.data)) setCuadrillas(rData.data);
+      } else {
+        console.error('❌ Error backend:', data);
+        alert('Error: ' + (data.message || JSON.stringify(data.errors || 'No se pudo guardar la cuadrilla')));
       }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error('❌ Error de red:', err);
+      alert('Error de conexión. Verifica que el backend esté corriendo.');
+    }
   };
 
   const handleDeleteCrew = async (id) => {
     if (!window.confirm('¿Eliminar esta cuadrilla?')) return;
     try {
-      await fetch(`http://localhost:3000/api/cuadrillas/${id}`, { method: 'DELETE' });
+      const token = localStorage.getItem('token');
+      await fetch(`http://localhost:3000/api/cuadrillas/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       setCuadrillas(cuadrillas.filter(c => c.id !== id));
     } catch (err) { console.error(err); }
   };
@@ -425,15 +473,26 @@ const Configuracion = () => {
               <input type="hidden" name="id" value={editingCrew?.id || ''} />
               <div>
                 <label>Nombre de la cuadrilla</label>
-                <input name="nombre" type="text" defaultValue={editingCrew?.nombre} required className="w-full mt-2 p-3 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none font-medium text-sm" />
+                <input
+                  name="nombre"
+                  type="text"
+                  defaultValue={editingCrew?.nombre}
+                  required
+                  placeholder="Ej. Cuadrilla de mampostería"
+                  className="w-full mt-2 p-3 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none font-medium text-sm"
+                />
               </div>
               <div>
-                <label>Descripción corta</label>
-                <input name="descripcion" type="text" defaultValue={editingCrew?.descripcion} placeholder="Ej. 1 Oficial + 2 Ayudantes" className="w-full mt-2 p-3 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none font-medium text-sm" />
-              </div>
-              <div>
-                <label>Costo Base por Día (COP)</label>
-                <input name="costo_diario" type="number" defaultValue={editingCrew?.costo_diario || 185000} required className="w-full mt-2 p-3 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none font-bold text-lg" />
+                <label>Rendimiento base <span className="text-sipo-slate text-xs">(opcional)</span></label>
+                <input
+                  name="rendimiento_base"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  defaultValue={editingCrew?.rendimiento_base || ''}
+                  placeholder="Ej. 8.5"
+                  className="w-full mt-2 p-3 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none font-medium text-sm"
+                />
               </div>
               <button type="submit" className="w-full bg-sipo-orange text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-95">
                 {editingCrew ? 'Actualizar' : 'Crear Cuadrilla'}

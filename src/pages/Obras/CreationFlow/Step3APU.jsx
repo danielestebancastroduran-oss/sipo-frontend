@@ -27,6 +27,7 @@ const Step3APU = () => {
   const [partida, setPartida] = useState(null);
   const [obra, setObra] = useState(null);
   const [showToast, setShowToast] = useState(null);
+  const [apuDetalles, setApuDetalles] = useState([]);
   
   // Estados para las 4 secciones
   const [materiales, setMateriales] = useState([]);
@@ -42,34 +43,43 @@ const Step3APU = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [obraRes, partidaRes, cuadrillasRes] = await Promise.all([
-        fetch(`http://localhost:3000/api/obras/${id}`),
-        fetch(`http://localhost:3000/api/partidas/${pid}`),
-        fetch(`http://localhost:3000/api/cuadrillas/usuario/${JSON.parse(localStorage.getItem('user'))?.id}`)
+      const token = localStorage.getItem('token');
+      const userId = JSON.parse(localStorage.getItem('user') || '{}')?.id;
+      const authHeader = { 'Authorization': `Bearer ${token}` };
+
+      const [obraRes, partidaRes, apuRes, cuadrillasRes] = await Promise.all([
+        fetch(`http://localhost:3000/api/obras/${id}`, { headers: authHeader }),
+        fetch(`http://localhost:3000/api/partidas/${pid}`, { headers: authHeader }),
+        fetch(`http://localhost:3000/api/apu-detalle/partida/${pid}`, { headers: authHeader }),
+        fetch(`http://localhost:3000/api/cuadrillas/usuario/${userId}`, { headers: authHeader })
       ]);
 
       const oData = await obraRes.json();
       const pData = await partidaRes.json();
+      const apuData = await apuRes.json();
       const cData = await cuadrillasRes.json();
-      console.log('SIPO Debug - Cuadrillas cargadas:', cData);
+      
+      console.log('🔍 Debug fetchData - obra:', oData.success, '| partida:', pData.success, '| apuData data exists:', Array.isArray(apuData.data));
 
       if (oData.success) setObra(oData.data);
-      if (pData.success) {
-        setPartida(pData.data);
-        if (pData.data.apu_detalles) {
-          // Filtrar por recurso -> tipo
-          setMateriales(pData.data.apu_detalles.filter(d => d.recursos?.tipo === 'material'));
-          setHerramientas(pData.data.apu_detalles.filter(d => d.recursos?.tipo === 'herramienta'));
-          setEquipos(pData.data.apu_detalles.filter(d => d.recursos?.tipo === 'equipo'));
-          
-          const cDetalle = pData.data.apu_detalles.find(d => d.cuadrillas);
-          if (cDetalle) {
-            setSelectedCuadrilla(cDetalle.cuadrillas);
-            setRendimiento(cDetalle.rendimiento || 1);
-          }
+      if (pData.success) setPartida(pData.data);
+      
+      if (Array.isArray(apuData.data)) {
+        const detalles = apuData.data;
+        setApuDetalles(detalles);
+        setMateriales(detalles.filter(d => d.recursos?.tipo === 'material'));
+        setHerramientas(detalles.filter(d => d.recursos?.tipo === 'herramienta'));
+        setEquipos(detalles.filter(d => d.recursos?.tipo === 'equipo'));
+        
+        const cDetalle = detalles.find(d => d.cuadrillas || d.cuadrilla_id);
+        if (cDetalle) {
+          setSelectedCuadrilla(cDetalle.cuadrillas);
+          setRendimiento(cDetalle.rendimiento || 1);
         }
       }
-      if (cData.success) setCuadrillas(cData.data || []);
+
+      // GET /cuadrillas/usuario/:id es paginado: devuelve { data:[...], pagination:{} } sin 'success'
+      if (Array.isArray(cData.data)) setCuadrillas(cData.data);
     } catch (err) {
       console.error('Error cargando APU:', err);
     } finally {
@@ -80,7 +90,10 @@ const Step3APU = () => {
   // Si no hay pid en la URL, redirigir a la primera partida
   useEffect(() => {
     if (!pid && id) {
-      fetch(`http://localhost:3000/api/obras/${id}/partidas`)
+      const token = localStorage.getItem('token');
+      fetch(`http://localhost:3000/api/obras/${id}/partidas`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
         .then(r => r.json())
         .then(data => {
           const partidas = data.data?.partidas || data.data || [];
@@ -107,96 +120,158 @@ const Step3APU = () => {
     }
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(
-        `http://localhost:3000/api/obras/${id}/partidas/${pid}/apu/${tipo}`,
-        {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            nombre: newItem.nombre,
-            unidad: newItem.unidad,
-            cantidad: Number(newItem.cantidad) || 0,
-            precio_unitario: Number(newItem.precio) || 0
-          })
-        }
-      );
-      const data = await response.json();
-      console.log('SIPO Debug - Respuesta agregar ítem:', data);
-      if (data.success) {
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+      if (!token || !user.id) {
+        alert('No estás autenticado. Inicia sesión nuevamente.');
+        return;
+      }
+
+      const authHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+
+      // Paso 1: Crear el recurso en /api/recursos
+      // tipo válido: 'material' | 'herramienta' | 'equipo'
+      const tipoRecurso = tipo === 'materiales' ? 'material'
+        : tipo === 'herramientas' ? 'herramienta'
+        : 'equipo';
+
+      // precio debe ser > 0 (Zod ApuDetalleCreateSchema: .positive())
+      const precioFinal = Math.max(Number(newItem.precio) || 0, 0.01);
+      const cantidadFinal = Math.max(Number(newItem.cantidad) || 0, 0.01);
+
+      console.log(`🔍 Paso 1 - Creando recurso tipo "${tipoRecurso}":`, {
+        usuario_id: user.id, nombre: newItem.nombre, tipo: tipoRecurso,
+        unidad: newItem.unidad, precio_unitario: precioFinal
+      });
+
+      const recursoRes = await fetch('http://localhost:3000/api/recursos', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          usuario_id: user.id,
+          nombre: newItem.nombre.trim(),
+          tipo: tipoRecurso,
+          unidad: newItem.unidad.trim(),
+          precio_unitario: precioFinal
+        })
+      });
+      const recursoData = await recursoRes.json();
+      console.log('📥 Paso 1 - Respuesta recurso:', recursoData);
+
+      if (!recursoData.success) {
+        alert('❌ Error al crear recurso: ' + (recursoData.message || JSON.stringify(recursoData.errors || '')));
+        return;
+      }
+
+      const recursoId = recursoData.data?.id;
+      if (!recursoId) {
+        alert('❌ El backend no devolvió ID del recurso.');
+        return;
+      }
+
+      // Paso 2: Crear el detalle APU en /api/apu-detalle
+      // Zod ApuDetalleCreateSchema: cantidad y precio_unitario deben ser > 0 (.positive())
+      console.log(`🔍 Paso 2 - Creando apu-detalle:`, {
+        partida_id: pid, recurso_id: recursoId,
+        cantidad: cantidadFinal, precio_unitario: precioFinal
+      });
+
+      const apuRes = await fetch('http://localhost:3000/api/apu-detalle', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          partida_id: pid,
+          recurso_id: recursoId,
+          cantidad: cantidadFinal,
+          precio_unitario: precioFinal
+        })
+      });
+      const apuData = await apuRes.json();
+      console.log('📥 Paso 2 - Respuesta apu-detalle:', apuData);
+
+      if (apuData.success) {
         setNewItem({ tipo: null, nombre: '', unidad: '', cantidad: 0, precio: 0 });
         fetchData();
       } else {
-        alert('Error: ' + (data.message || 'No se pudo guardar'));
+        alert('Error al agregar ítem al APU: ' + (apuData.message || JSON.stringify(apuData.errors || '')));
       }
     } catch (err) {
-      console.error('Error agregando ítem:', err);
-      alert('Error de conexión al guardar el ítem');
+      console.error('❌ Error agregando ítem:', err);
+      alert('Error de conexión: ' + err.message);
     }
   };
 
-  const handleRemove = async (recursoId) => {
-    if (!recursoId) {
-      console.error('SIPO Debug - recursoId es undefined');
+  const handleRemove = async (apuDetalleId) => {
+    if (!apuDetalleId) {
+      console.error('❌ apuDetalleId es undefined — no se puede eliminar');
+      alert('Error: ID del ítem APU no disponible.');
       return;
     }
     try {
       const token = localStorage.getItem('token');
+      console.log(`🗑️ Eliminando apu-detalle ID: ${apuDetalleId}`);
       const response = await fetch(
-        `http://localhost:3000/api/obras/${id}/partidas/${pid}/apu/recurso/${recursoId}`,
+        `http://localhost:3000/api/apu-detalle/${apuDetalleId}`,
         { 
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${token}` }
         }
       );
       const data = await response.json();
-      console.log('SIPO Debug - Respuesta eliminar:', data);
+      console.log('📥 Respuesta eliminar apu-detalle:', data);
       if (data.success) {
         fetchData();
       } else {
         alert('Error al eliminar: ' + (data.message || 'Error desconocido'));
       }
     } catch (err) {
-      console.error('Error eliminando ítem:', err);
+      console.error('❌ Error eliminando ítem:', err);
     }
   };
 
   const handleSaveAPU = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(
-        `http://localhost:3000/api/obras/${id}/partidas/${pid}/apu`,
-        {
-          method: 'PUT',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            cuadrilla_id: selectedCuadrilla?.id || null,
-            rendimiento: Number(rendimiento) || 1
-          })
+      const authHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      };
+
+      // Si hay cuadrilla seleccionada, guardarla como apu-detalle
+      // La ruta /obras/:id/partidas/:pid/apu NO existe en el backend.
+      // El link cuadrilla↔partida se guarda via POST /api/apu-detalle con cuadrilla_id
+      if (selectedCuadrilla?.id) {
+        // Eliminar detalle de cuadrilla previo si existe (para no duplicar)
+        const prevCuadrillaDetalle = apuDetalles.find(d => d.cuadrilla_id);
+        if (prevCuadrillaDetalle?.id) {
+          await fetch(`http://localhost:3000/api/apu-detalle/${prevCuadrillaDetalle.id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
         }
-      );
-      const data = await response.json();
-      console.log('SIPO Debug - Respuesta guardar APU:', data);
-      
-      // Navegar SIEMPRE al siguiente paso, haya o no error
-      // El APU puede guardarse parcialmente y continuar
-      if (data.success || response.ok) {
-        setShowToast({ message: 'APU guardado correctamente ✓', type: 'success' });
-        setTimeout(() => navigate(`/obras/${id}/costos`), 1000);
-      } else {
-        // Si falla el guardado, preguntar si igual quiere continuar
-        const continuar = window.confirm(
-          'No se pudo guardar el APU en el servidor. ¿Continuar al siguiente paso de todos modos?'
-        );
-        if (continuar) navigate(`/obras/${id}/costos`);
+        // Crear el nuevo detalle con la cuadrilla seleccionada
+        const cuadRes = await fetch('http://localhost:3000/api/apu-detalle', {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({
+            partida_id: pid,
+            cuadrilla_id: selectedCuadrilla.id,
+            cantidad: Math.max(Number(rendimiento) || 1, 0.01),
+            precio_unitario: Math.max(selectedCuadrilla.costo_diario || 1, 0.01),
+            rendimiento: Math.max(Number(rendimiento) || 1, 0.01)
+          })
+        });
+        const cuadData = await cuadRes.json();
+        console.log('📥 Respuesta guardar cuadrilla APU:', cuadData);
       }
+
+      setShowToast({ message: 'APU guardado correctamente ✓', type: 'success' });
+      setTimeout(() => navigate(`/obras/${id}/costos`), 1000);
     } catch (err) {
-      console.error('Error guardando APU:', err);
+      console.error('❌ Error guardando APU:', err);
       const continuar = window.confirm(
         'Error de conexión. ¿Continuar al siguiente paso de todos modos?'
       );
@@ -301,7 +376,7 @@ const Step3APU = () => {
                         <td className="px-6 py-3 text-right font-bold">{formatCOP(parseNum(m.cantidad) * parseNum(m.precio_unitario))}</td>
                         <td className="px-6 py-3 text-center">
                           <button 
-                            onClick={() => handleRemove(m.recurso_id)}
+                            onClick={() => handleRemove(m.id)}
                             className="text-sipo-red hover:bg-sipo-red-bg p-1.5 rounded-lg transition-colors"
                           >
                             <Trash2 size={16}/>
@@ -355,7 +430,7 @@ const Step3APU = () => {
                         <td className="px-6 py-3 text-right">{formatCOP(h.precio_unitario)}</td>
                         <td className="px-6 py-3 text-right font-bold">{formatCOP(parseNum(h.cantidad) * parseNum(h.precio_unitario))}</td>
                         <td className="px-6 py-3 text-center">
-                           <button onClick={() => handleRemove(h.recurso_id)} className="text-sipo-red hover:bg-sipo-red-bg p-1.5 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                           <button onClick={() => handleRemove(h.id)} className="text-sipo-red hover:bg-sipo-red-bg p-1.5 rounded-lg transition-colors"><Trash2 size={16}/></button>
                         </td>
                       </tr>
                     ))}
@@ -405,7 +480,7 @@ const Step3APU = () => {
                         <td className="px-6 py-3 text-right">{formatCOP(e.precio_unitario)}</td>
                         <td className="px-6 py-3 text-right font-bold">{formatCOP(parseNum(e.cantidad) * parseNum(e.precio_unitario))}</td>
                         <td className="px-6 py-3 text-center">
-                           <button onClick={() => handleRemove(e.recurso_id)} className="text-sipo-red hover:bg-sipo-red-bg p-1.5 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                           <button onClick={() => handleRemove(e.id)} className="text-sipo-red hover:bg-sipo-red-bg p-1.5 rounded-lg transition-colors"><Trash2 size={16}/></button>
                         </td>
                       </tr>
                     ))}
