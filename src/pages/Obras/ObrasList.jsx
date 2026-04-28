@@ -20,18 +20,29 @@ const ObrasList = () => {
 
   useEffect(() => {
     const fetchData = async () => {
+      const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+      if (!currentUser?.id) {
+        setLoading(false);
+        return;
+      }
       try {
-        const response = await fetch(`http://localhost:3000/api/obras/usuario/${user.id}`);
+        const token = localStorage.getItem('token');
+        const response = await fetch(`http://localhost:3000/api/obras/usuario/${currentUser.id}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
         const data = await response.json();
-        if (data.success) setObras(data.data || []);
+        
+        if ((data.success || data.data) && Array.isArray(data.data)) {
+          setObras([...data.data]);
+        }
       } catch (err) {
         console.error('Error cargando obras:', err);
       } finally {
         setLoading(false);
       }
     };
-    if (user.id) fetchData();
-  }, [user.id]);
+    fetchData();
+  }, []); // Solo al montar
 
   const formatCOP = (val) => {
     if (isNaN(val) || val === null) return '$0';
@@ -49,10 +60,15 @@ const ObrasList = () => {
     return 'bg-amber-50 text-amber-600 border-amber-200';
   };
 
-  const filteredObras = obras.filter(o => 
-    o.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    o.cliente?.nombre?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const [statusFilter, setStatusFilter] = useState('Todos');
+
+  const filteredObras = (obras || []).filter(o => {
+    const matchesSearch = (o.nombre || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (o.cliente?.nombre || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusFilter === 'Todos' || 
+                         (o.estado || 'borrador').toLowerCase() === statusFilter.toLowerCase();
+    return matchesSearch && matchesStatus;
+  });
 
   return (
     <div className="space-y-6">
@@ -82,20 +98,25 @@ const ObrasList = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <select className="bg-sipo-surface border border-sipo-border px-4 py-2.5 rounded-xl text-sm font-medium outline-none focus:border-sipo-orange">
-          <option>Todos los estados</option>
-          <option>Activo</option>
-          <option>Pendiente</option>
-          <option>Finalizado</option>
+        <select 
+          className="bg-sipo-surface border border-sipo-border px-4 py-2.5 rounded-xl text-sm font-medium outline-none focus:border-sipo-orange"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          <option value="Todos">Todos los estados</option>
+          <option value="activo">Activo</option>
+          <option value="borrador">Borrador</option>
+          <option value="finalizado">Finalizado</option>
         </select>
       </div>
+
 
       {loading ? (
         <div className="py-20 flex flex-col items-center gap-4">
           <Loader2 className="animate-spin text-sipo-orange" size={40} />
           <p className="text-sipo-slate font-medium">Sincronizando con el servidor...</p>
         </div>
-      ) : filteredObras.length === 0 ? (
+      ) : (obras || []).length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-sipo-border">
            <div className="w-20 h-20 bg-sipo-surface rounded-full flex items-center justify-center mb-4">
             <Building2 size={32} className="text-sipo-slate-light" />
@@ -119,10 +140,10 @@ const ObrasList = () => {
               <div className="space-y-4">
                 <div>
                   <h3 className="font-barlow font-bold text-xl text-sipo-carbon italic uppercase line-clamp-1 group-hover:text-sipo-orange transition-colors">
-                    {obra.nombre}
+                    {obra.nombre || 'PROYECTO SIN NOMBRE'}
                   </h3>
                   <p className="text-[11px] uppercase tracking-wider text-sipo-slate font-bold mt-1">
-                    {obra.cliente?.nombre || 'Sin cliente identificado'}
+                    {obra.cliente?.nombre || 'CLIENTE NO DEFINIDO'}
                   </p>
                 </div>
 

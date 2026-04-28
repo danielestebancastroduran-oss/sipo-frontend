@@ -27,49 +27,85 @@ const Step3APU = () => {
   const [partida, setPartida] = useState(null);
   const [obra, setObra] = useState(null);
   const [showToast, setShowToast] = useState(null);
+  const [apuDetalles, setApuDetalles] = useState([]);
   
   // Estados para las 4 secciones
   const [materiales, setMateriales] = useState([]);
   const [herramientas, setHerramientas] = useState([]);
   const [equipos, setEquipos] = useState([]);
   const [cuadrillas, setCuadrillas] = useState([]);
-  const [selectedCuadrilla, setSelectedCuadrilla] = useState(null);
   const [rendimiento, setRendimiento] = useState(1);
 
   // Inline Row State
-  const [newItem, setNewItem] = useState({ tipo: null, nombre: '', unidad: '', cantidad: 0, precio: 0 });
+  const [newItem, setNewItem] = useState({ tipo: null, nombre: '', unidad: '', cantidad: 0, precio: 0, recurso_id: null });
+  const [recursosCatalogo, setRecursosCatalogo] = useState([]);
+  const [filteredRecursos, setFilteredRecursos] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Estado para creación de cuadrilla inline
+  const [isCreatingCuadrilla, setIsCreatingCuadrilla] = useState(false);
+  const [newCuadrilla, setNewCuadrilla] = useState({ nombre: '', costo_diario: '' });
+
+  const handleAddCuadrilla = async (cuadrilla) => {
+    try {
+      const token = localStorage.getItem('token');
+      const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+      const res = await fetch('http://localhost:3000/api/apu-detalle', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          partida_id: pid,
+          cuadrilla_id: cuadrilla.id,
+          cantidad: 1, // Rendimiento inicial 1
+          precio_unitario: cuadrilla.costo_diario,
+          rendimiento: 1
+        })
+      });
+      
+      if (res.ok) fetchData();
+    } catch (err) {
+      console.error('Error al agregar cuadrilla:', err);
+    }
+  };
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [obraRes, partidaRes, cuadrillasRes] = await Promise.all([
-        fetch(`http://localhost:3000/api/obras/${id}`),
-        fetch(`http://localhost:3000/api/partidas/${pid}`),
-        fetch(`http://localhost:3000/api/cuadrillas/usuario/${JSON.parse(localStorage.getItem('user'))?.id}`)
+      const token = localStorage.getItem('token');
+      const userId = JSON.parse(localStorage.getItem('user') || '{}')?.id;
+      const authHeader = { 'Authorization': `Bearer ${token}` };
+
+      const [obraRes, partidaRes, apuRes, cuadrillasRes, recursosRes] = await Promise.all([
+        fetch(`http://localhost:3000/api/obras/${id}`, { headers: authHeader }),
+        fetch(`http://localhost:3000/api/partidas/${pid}`, { headers: authHeader }),
+        fetch(`http://localhost:3000/api/apu-detalle/partida/${pid}`, { headers: authHeader }),
+        fetch(`http://localhost:3000/api/cuadrillas/usuario/${userId}`, { headers: authHeader }),
+        fetch(`http://localhost:3000/api/recursos/usuario/${userId}`, { headers: authHeader })
       ]);
 
       const oData = await obraRes.json();
       const pData = await partidaRes.json();
+      const apuData = await apuRes.json();
       const cData = await cuadrillasRes.json();
-      console.log('SIPO Debug - Cuadrillas cargadas:', cData);
-
+      const rData = await recursosRes.json();
+      
       if (oData.success) setObra(oData.data);
-      if (pData.success) {
-        setPartida(pData.data);
-        if (pData.data.apu_detalles) {
-          // Filtrar por recurso -> tipo
-          setMateriales(pData.data.apu_detalles.filter(d => d.recursos?.tipo === 'material'));
-          setHerramientas(pData.data.apu_detalles.filter(d => d.recursos?.tipo === 'herramienta'));
-          setEquipos(pData.data.apu_detalles.filter(d => d.recursos?.tipo === 'equipo'));
-          
-          const cDetalle = pData.data.apu_detalles.find(d => d.cuadrillas);
-          if (cDetalle) {
-            setSelectedCuadrilla(cDetalle.cuadrillas);
-            setRendimiento(cDetalle.rendimiento || 1);
-          }
-        }
+      if (pData.success) setPartida(pData.data);
+      
+      if (Array.isArray(apuData.data)) {
+        const detalles = apuData.data;
+        setApuDetalles(detalles);
+        setMateriales(detalles.filter(d => d.recursos?.tipo === 'material'));
+        setHerramientas(detalles.filter(d => d.recursos?.tipo === 'herramienta'));
+        setEquipos(detalles.filter(d => d.recursos?.tipo === 'equipo'));
+        
+        
       }
-      if (cData.success) setCuadrillas(cData.data || []);
+
+      if (Array.isArray(cData.data)) setCuadrillas(cData.data);
+      if (Array.isArray(rData.data)) setRecursosCatalogo(rData.data);
+
     } catch (err) {
       console.error('Error cargando APU:', err);
     } finally {
@@ -77,10 +113,12 @@ const Step3APU = () => {
     }
   };
 
-  // Si no hay pid en la URL, redirigir a la primera partida
   useEffect(() => {
     if (!pid && id) {
-      fetch(`http://localhost:3000/api/obras/${id}/partidas`)
+      const token = localStorage.getItem('token');
+      fetch(`http://localhost:3000/api/obras/${id}/partidas`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
         .then(r => r.json())
         .then(data => {
           const partidas = data.data?.partidas || data.data || [];
@@ -100,133 +138,291 @@ const Step3APU = () => {
     }
   }, [id, pid]);
 
-  const handleAddItem = async (tipo) => {
-    if (!newItem.nombre || !newItem.unidad) {
-      alert('Completa al menos el nombre y la unidad');
+  const handleSearchNombre = (val, tipo) => {
+    setNewItem({ ...newItem, nombre: val, recurso_id: null });
+    const tipoRecurso = tipo === 'materiales' ? 'material' : tipo === 'herramientas' ? 'herramienta' : 'equipo';
+    
+    if (!val || val.trim().length === 0) {
+      setFilteredRecursos([]);
+      setShowSuggestions(false);
       return;
     }
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(
-        `http://localhost:3000/api/obras/${id}/partidas/${pid}/apu/${tipo}`,
-        {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            nombre: newItem.nombre,
-            unidad: newItem.unidad,
-            cantidad: Number(newItem.cantidad) || 0,
-            precio_unitario: Number(newItem.precio) || 0
-          })
-        }
-      );
-      const data = await response.json();
-      console.log('SIPO Debug - Respuesta agregar ítem:', data);
-      if (data.success) {
-        setNewItem({ tipo: null, nombre: '', unidad: '', cantidad: 0, precio: 0 });
-        fetchData();
-      } else {
-        alert('Error: ' + (data.message || 'No se pudo guardar'));
+    
+    const matches = recursosCatalogo.filter(r => 
+      r.tipo === tipoRecurso && 
+      r.nombre.toLowerCase().includes(val.toLowerCase().trim())
+    );
+
+    // Eliminar duplicados por nombre (insensible a mayúsculas)
+    const uniqueMatches = [];
+    const seenNames = new Set();
+    
+    matches.forEach(m => {
+      const nameKey = m.nombre.toLowerCase().trim();
+      if (!seenNames.has(nameKey)) {
+        seenNames.add(nameKey);
+        uniqueMatches.push(m);
       }
-    } catch (err) {
-      console.error('Error agregando ítem:', err);
-      alert('Error de conexión al guardar el ítem');
+    });
+    
+    setFilteredRecursos(uniqueMatches);
+    setShowSuggestions(uniqueMatches.length > 0);
+  };
+
+  const handleTargetLaborCostChange = (val) => {
+    const targetCost = Number(val);
+    if (targetCost > 0 && selectedCuadrilla?.costo_diario) {
+      // Rendimiento = Costo Diario / Costo Objetivo por Unidad
+      const calculatedRend = selectedCuadrilla.costo_diario / targetCost;
+      setRendimiento(Number(calculatedRend.toFixed(4)));
     }
   };
 
-  const handleRemove = async (recursoId) => {
-    if (!recursoId) {
-      console.error('SIPO Debug - recursoId es undefined');
+  const handleSelectRecurso = (recurso) => {
+    setNewItem({
+      ...newItem,
+      nombre: recurso.nombre,
+      unidad: recurso.unidad,
+      precio: recurso.precio_unitario,
+      recurso_id: recurso.id
+    });
+    setShowSuggestions(false);
+  };
+
+  const handleAddItem = async (tipo) => {
+    if (!newItem.nombre) {
+      alert('Debes escribir el nombre del ítem para agregarlo.');
       return;
     }
+    
+    const unidadFinal = newItem.unidad?.trim() || 'Und';
+
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(
-        `http://localhost:3000/api/obras/${id}/partidas/${pid}/apu/recurso/${recursoId}`,
-        { 
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token}` }
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+      let recursoId = newItem.recurso_id;
+
+      if (!recursoId) {
+        const tipoRecurso = tipo === 'materiales' ? 'material' : tipo === 'herramientas' ? 'herramienta' : 'equipo';
+        const precioFinal = Math.max(parseNum(newItem.precio) || 0, 0.01);
+
+        const recursoRes = await fetch('http://localhost:3000/api/recursos', {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({
+            usuario_id: user.id,
+            nombre: newItem.nombre.trim(),
+            tipo: tipoRecurso,
+            unidad: unidadFinal,
+            precio_unitario: precioFinal
+          })
+        });
+        const recursoData = await recursoRes.json();
+        if (!recursoData.success) {
+          alert('❌ Error al crear recurso: ' + (recursoData.message || ''));
+          return;
         }
-      );
-      const data = await response.json();
-      console.log('SIPO Debug - Respuesta eliminar:', data);
-      if (data.success) {
+        recursoId = recursoData.data?.id;
+      }
+
+      const cantidadFinal = Math.max(parseNum(newItem.cantidad) || 0, 0.01);
+      const precioFinal = Math.max(parseNum(newItem.precio) || 0, 0.01);
+
+      const apuRes = await fetch('http://localhost:3000/api/apu-detalle', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          partida_id: pid,
+          recurso_id: recursoId,
+          cantidad: cantidadFinal,
+          precio_unitario: precioFinal
+        })
+      });
+      const apuData = await apuRes.json();
+
+      if (apuData.success) {
+        setNewItem({ tipo: null, nombre: '', unidad: '', cantidad: 0, precio: 0, recurso_id: null });
         fetchData();
       } else {
-        alert('Error al eliminar: ' + (data.message || 'Error desconocido'));
+        alert('Error al agregar ítem al APU: ' + apuData.message);
       }
     } catch (err) {
+      console.error('❌ Error agregando ítem:', err);
+    }
+  };
+
+  const handleChangeItem = (apuDetalleId, field, value) => {
+    const updated = apuDetalles.map(d => d.id === apuDetalleId ? { ...d, [field]: value } : d);
+    setApuDetalles(updated);
+    setMateriales(updated.filter(d => d.recursos?.tipo === 'material'));
+    setHerramientas(updated.filter(d => d.recursos?.tipo === 'herramienta'));
+    setEquipos(updated.filter(d => d.recursos?.tipo === 'equipo'));
+  };
+
+  const handleUpdateItem = async (apuDetalleId, field, value) => {
+    try {
+      const token = localStorage.getItem('token');
+      const numValue = parseNum(value);
+      if (isNaN(numValue)) return;
+
+      const response = await fetch(`http://localhost:3000/api/apu-detalle/${apuDetalleId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ [field]: numValue })
+      });
+      
+      if (response.ok) {
+        // La interfaz ya se actualizó localmente, aquí aseguramos el numérico parseado final
+        const updated = apuDetalles.map(d => d.id === apuDetalleId ? { ...d, [field]: numValue } : d);
+        setApuDetalles(updated);
+        setMateriales(updated.filter(d => d.recursos?.tipo === 'material'));
+        setHerramientas(updated.filter(d => d.recursos?.tipo === 'herramienta'));
+        setEquipos(updated.filter(d => d.recursos?.tipo === 'equipo'));
+      }
+    } catch (err) {
+      console.error('Error actualizando ítem:', err);
+    }
+  };
+
+  const handleRemove = async (apuDetalleId) => {
+    if (!apuDetalleId) return;
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:3000/api/apu-detalle/${apuDetalleId}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) fetchData();
+    } catch (err) {
       console.error('Error eliminando ítem:', err);
+    }
+  };
+
+  const handleCreateCuadrilla = async () => {
+    if (!newCuadrilla.nombre) {
+      alert('Debes darle un nombre a la cuadrilla');
+      return;
+    }
+    
+    try {
+      const token = localStorage.getItem('token');
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      const costoDiario = Math.max(parseNum(newCuadrilla.costo_diario) || 0, 0);
+
+      const res = await fetch('http://localhost:3000/api/cuadrillas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          usuario_id: user.id,
+          nombre: newCuadrilla.nombre.trim(),
+          costo_diario: costoDiario
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setCuadrillas([...cuadrillas, data.data]);
+        handleAddCuadrilla(data.data); // Agregar automáticamente al APU actual
+        setIsCreatingCuadrilla(false);
+        setNewCuadrilla({ nombre: '', costo_diario: '' });
+      } else {
+        alert('Error al crear cuadrilla: ' + (data.message || ''));
+      }
+    } catch (err) {
+      console.error('Error creando cuadrilla:', err);
     }
   };
 
   const handleSaveAPU = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(
-        `http://localhost:3000/api/obras/${id}/partidas/${pid}/apu`,
-        {
-          method: 'PUT',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({
-            cuadrilla_id: selectedCuadrilla?.id || null,
-            rendimiento: Number(rendimiento) || 1
-          })
-        }
-      );
-      const data = await response.json();
-      console.log('SIPO Debug - Respuesta guardar APU:', data);
-      
-      // Navegar SIEMPRE al siguiente paso, haya o no error
-      // El APU puede guardarse parcialmente y continuar
-      if (data.success || response.ok) {
-        setShowToast({ message: 'APU guardado correctamente ✓', type: 'success' });
-        setTimeout(() => navigate(`/obras/${id}/costos`), 1000);
-      } else {
-        // Si falla el guardado, preguntar si igual quiere continuar
-        const continuar = window.confirm(
-          'No se pudo guardar el APU en el servidor. ¿Continuar al siguiente paso de todos modos?'
-        );
-        if (continuar) navigate(`/obras/${id}/costos`);
-      }
+      const authHeaders = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` };
+
+      // Las cuadrillas ya se guardan al agregarse o editarse inline. 
+      // Solo actualizamos el valor unitario de la partida.
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      await fetch(`http://localhost:3000/api/partidas/${pid}`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ 
+          valor_unitario: totalAPUUnidad,
+          obra_id: id,
+          nombre: partida.nombre,
+          unidad: partida.unidad,
+          cantidad: partida.cantidad
+        })
+      });
+
+      setShowToast({ message: 'APU guardado correctamente ✓', type: 'success' });
+      setTimeout(() => navigate(`/obras/${id}/costos`), 1000);
     } catch (err) {
-      console.error('Error guardando APU:', err);
-      const continuar = window.confirm(
-        'Error de conexión. ¿Continuar al siguiente paso de todos modos?'
-      );
-      if (continuar) navigate(`/obras/${id}/costos`);
+      console.error('❌ Error guardando APU:', err);
+      navigate(`/obras/${id}/costos`);
     }
   };
 
   // Cálculos
-  const totalMateriales = materiales.reduce((sum, item) => sum + (item.cantidad * item.precio_unitario), 0);
-  const totalHerramientas = herramientas.reduce((sum, item) => sum + (item.cantidad * item.costo_uso), 0);
-  const totalEquipos = equipos.reduce((sum, item) => sum + (item.cantidad * item.costo), 0);
+  const totalMateriales = materiales.reduce((sum, item) => sum + (parseNum(item.cantidad) * parseNum(item.precio_unitario)), 0);
+  const totalHerramientas = herramientas.reduce((sum, item) => sum + (parseNum(item.cantidad) * parseNum(item.precio_unitario)), 0);
+  const totalEquipos = equipos.reduce((sum, item) => sum + (parseNum(item.cantidad) * parseNum(item.precio_unitario)), 0);
   
-  const costoCuadrillaUnidad = selectedCuadrilla ? (selectedCuadrilla.costo_diario / rendimiento) : 0;
-  
-  const totalAPUUnidad = totalMateriales + totalHerramientas + totalEquipos + costoCuadrillaUnidad;
+  const totalCuadrillas = apuDetalles
+    .filter(d => d.cuadrillas || d.cuadrilla_id)
+    .reduce((sum, c) => sum + (Number(c.precio_unitario) / (Number(c.rendimiento) || 1)), 0);
 
-  const TableHeader = ({ icon: Icon, title, onAdd }) => (
+  const totalAPUUnidad = totalMateriales + totalHerramientas + totalEquipos + totalCuadrillas;
+
+  const renderTableHeader = (Icon, title, onAdd) => (
     <div className="bg-sipo-carbon p-4 flex justify-between items-center rounded-t-xl">
       <div className="flex items-center gap-3 text-sipo-cream">
         <Icon size={20} className="text-sipo-orange" />
         <h3 className="font-barlow font-bold uppercase tracking-wider">{title}</h3>
       </div>
-      <button 
-        onClick={onAdd}
-        className="text-[10px] uppercase font-bold text-sipo-orange hover:text-white flex items-center gap-1 transition-colors"
-      >
-        <Plus size={14} />
-        Agregar ítem
+      <button onClick={onAdd} className="text-[10px] uppercase font-bold text-sipo-orange hover:text-white flex items-center gap-1 transition-colors">
+        <Plus size={14} /> Agregar ítem
       </button>
     </div>
+  );
+
+  const renderAutocompleteRow = (tipo) => (
+    <tr className="bg-sipo-orange-bg/10 animate-fade-in border-2 border-sipo-orange/30">
+      <td className="px-4 py-2 relative">
+        <input 
+          className="w-full p-2 rounded border border-sipo-border outline-none focus:border-sipo-orange font-bold text-sipo-carbon bg-white" 
+          placeholder="Buscar o escribir nuevo..." 
+          value={newItem.nombre} 
+          onChange={e => handleSearchNombre(e.target.value, tipo)}
+          onFocus={() => newItem.nombre && setShowSuggestions(true)}
+          onKeyDown={e => e.key === 'Enter' && handleAddItem(tipo)}
+        />
+        {showSuggestions && filteredRecursos.length > 0 && (
+          <div className="absolute left-0 right-0 z-[999] mt-1 bg-white border-2 border-sipo-orange rounded-xl shadow-2xl max-h-60 overflow-y-auto">
+            <div className="bg-sipo-orange/5 p-2 border-b border-sipo-orange/20">
+              <p className="text-[10px] font-bold text-sipo-orange uppercase tracking-widest text-center">Catálogo Global</p>
+            </div>
+            {filteredRecursos.map(r => (
+              <div key={r.id} className="p-3 hover:bg-sipo-orange hover:text-white cursor-pointer border-b border-sipo-border last:border-none flex justify-between items-center group transition-colors" onClick={() => handleSelectRecurso(r)}>
+                <div>
+                  <p className="font-bold text-sm">{r.nombre}</p>
+                  <p className="text-[10px] uppercase font-bold opacity-80">{r.unidad} • {formatCOP(r.precio_unitario)}</p>
+                </div>
+                <Plus size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+              </div>
+            ))}
+          </div>
+        )}
+      </td>
+      <td className="px-4 py-2 w-20"><input className="w-full p-2 rounded text-center bg-white border border-sipo-border" placeholder="Und" value={newItem.unidad} onChange={e => setNewItem({...newItem, unidad: e.target.value})} onKeyDown={e => e.key === 'Enter' && handleAddItem(tipo)} /></td>
+      <td className="px-4 py-2 w-24"><input type="number" className="w-full p-2 rounded text-right bg-white border border-sipo-border" value={newItem.cantidad} onChange={e => setNewItem({...newItem, cantidad: e.target.value})} onKeyDown={e => e.key === 'Enter' && handleAddItem(tipo)} /></td>
+      <td className="px-4 py-2 w-32"><input type="number" className="w-full p-2 rounded text-right bg-white border border-sipo-border" value={newItem.precio} onChange={e => setNewItem({...newItem, precio: e.target.value})} onKeyDown={e => e.key === 'Enter' && handleAddItem(tipo)} /></td>
+      <td className="px-4 py-2 text-right font-bold text-sipo-carbon">{formatCOP(newItem.cantidad * newItem.precio)}</td>
+      <td className="px-4 py-2 flex gap-1">
+         <button onClick={() => handleAddItem(tipo)} className="p-2 bg-sipo-green text-white rounded-lg hover:scale-105 transition-transform"><Check size={16}/></button>
+         <button onClick={() => {setNewItem({tipo:null, nombre:'', unidad:'', cantidad:0, precio:0, recurso_id:null}); setShowSuggestions(false);}} className="p-2 bg-white text-sipo-red border border-sipo-red rounded-lg"><X size={16}/></button>
+      </td>
+    </tr>
   );
 
   if (loading) return <div className="py-20 flex justify-center"><Loader2 className="animate-spin text-sipo-orange" size={40} /></div>;
@@ -234,350 +430,250 @@ const Step3APU = () => {
   return (
     <div className="animate-fade-in pb-20">
       <TabProgreso currentStep={3} />
-
       <div className="max-w-[1200px] mx-auto space-y-8">
         <header className="flex justify-between items-end">
           <div>
             <Link to={`/obras/${id}/partidas`} className="text-xs font-bold text-sipo-orange flex items-center gap-1 mb-2 hover:underline">
               <ChevronLeft size={14} /> Volver al listado
             </Link>
-            <h1 className="text-3xl font-barlow font-bold text-sipo-carbon italic uppercase">Análisis de Precio Unitario (APU)</h1>
+            <h1 className="text-3xl font-barlow font-bold text-sipo-carbon italic uppercase">APU: {partida?.nombre}</h1>
           </div>
-          <button 
-            onClick={handleSaveAPU}
-            className="bg-sipo-green hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-sipo-green/20"
-          >
-            <Save size={18} />
-            Guardar APU
+          <button onClick={handleSaveAPU} className="bg-sipo-green hover:bg-green-700 text-white font-bold py-3 px-6 rounded-xl flex items-center gap-2 transition-all shadow-lg">
+            <Save size={18} /> Guardar APU
           </button>
         </header>
 
-        {/* Tarjetas de Contexto */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {[
-            { label: 'Partida', value: partida?.nombre, detail: 'ID: ' + pid },
-            { label: 'Unidad', value: partida?.unidad || 'm2', detail: 'Medida base' },
-            { label: 'Cantidad en obra', value: partida?.cantidad || 0, detail: 'Total proyecto' },
-            { label: 'Costo por unidad', value: formatCOP(totalAPUUnidad), detail: 'Calculado', highlight: true }
+            { label: 'Unidad', value: partida?.unidad || 'm2' },
+            { label: 'Cantidad Obra', value: partida?.cantidad || 0 },
+            { label: 'Costo Unitario', value: formatCOP(totalAPUUnidad), highlight: true }
           ].map((card, i) => (
             <div key={i} className="bg-white p-5 rounded-xl border border-sipo-border border-t-[3px] border-t-sipo-orange shadow-sm">
-              <p className="text-[10px] uppercase text-sipo-slate font-bold tracking-wider">{card.label}</p>
-              <h4 className={`text-xl font-barlow font-bold mt-1 truncate ${card.highlight ? 'text-sipo-orange' : 'text-sipo-carbon'}`}>
-                {card.value}
-              </h4>
-              <p className="text-[10px] text-sipo-slate-light mt-1">{card.detail}</p>
+              <p className="text-[10px] uppercase text-sipo-slate font-bold">{card.label}</p>
+              <h4 className={`text-xl font-barlow font-bold mt-1 ${card.highlight ? 'text-sipo-orange' : 'text-sipo-carbon'}`}>{card.value}</h4>
             </div>
           ))}
         </div>
 
-        {/* Tablas de APU */}
         <div className="space-y-10">
-          
           {/* MATERIALES */}
-          <section className="bg-white rounded-xl border border-sipo-border shadow-sm overflow-hidden">
-            <TableHeader icon={Package} title="Materiales" onAdd={() => setNewItem({tipo: 'materiales', nombre: '', unidad: '', cantidad: 0, precio: 0})} />
+          <section className="bg-white rounded-xl border border-sipo-border shadow-sm overflow-visible">
+            {renderTableHeader(Package, "Materiales", () => setNewItem({tipo: 'materiales', nombre: '', unidad: '', cantidad: 0, precio: 0}))}
             <table className="w-full text-left text-[13px]">
               <thead className="bg-sipo-surface border-b border-sipo-border">
                 <tr className="text-[10px] uppercase font-bold text-sipo-slate">
                   <th className="px-6 py-3">Recurso</th>
-                  <th className="px-6 py-3 text-center">Unidad</th>
-                  <th className="px-6 py-3 text-right">Cantidad</th>
-                  <th className="px-6 py-3 text-right">Precio Unit.</th>
-                  <th className="px-6 py-3 text-right">Subtotal</th>
+                  <th className="px-6 py-3 text-center">Und</th>
+                  <th className="px-6 py-3 text-right">Cant</th>
+                  <th className="px-6 py-3 text-right">Precio</th>
+                  <th className="px-6 py-3 text-right">Total</th>
                   <th className="px-6 py-3 text-center w-16"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-sipo-border">
-                {materiales.length === 0 && newItem.tipo !== 'materiales' ? (
-                  <tr><td colSpan="6" className="px-6 py-8 text-center text-sipo-slate-light italic">No hay materiales agregados</td></tr>
-                ) : (
-                  <>
-                    {materiales.map((m, i) => (
-                      <tr key={i} className="hover:bg-sipo-surface">
-                        <td className="px-6 py-3 font-medium">{m.recursos?.nombre}</td>
-                        <td className="px-6 py-3 text-center">{m.recursos?.unidad}</td>
-                        <td className="px-6 py-3 text-right">{m.cantidad}</td>
-                        <td className="px-6 py-3 text-right">{formatCOP(m.precio_unitario)}</td>
-                        <td className="px-6 py-3 text-right font-bold">{formatCOP(parseNum(m.cantidad) * parseNum(m.precio_unitario))}</td>
-                        <td className="px-6 py-3 text-center">
-                          <button 
-                            onClick={() => handleRemove(m.recurso_id)}
-                            className="text-sipo-red hover:bg-sipo-red-bg p-1.5 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={16}/>
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {newItem.tipo === 'materiales' && (
-                      <tr className="bg-sipo-orange-bg/10 animate-fade-in">
-                        <td className="px-4 py-2"><input className="w-full p-2 rounded" placeholder="Nombre..." value={newItem.nombre} onChange={e => setNewItem({...newItem, nombre: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-20"><input className="w-full p-2 rounded text-center" placeholder="Und" value={newItem.unidad} onChange={e => setNewItem({...newItem, unidad: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-24"><input type="number" className="w-full p-2 rounded text-right" value={newItem.cantidad} onChange={e => setNewItem({...newItem, cantidad: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-32"><input type="number" className="w-full p-2 rounded text-right" value={newItem.precio} onChange={e => setNewItem({...newItem, precio: e.target.value})} /></td>
-                        <td className="px-4 py-2 text-right font-bold">{formatCOP(newItem.cantidad * newItem.precio)}</td>
-                        <td className="px-4 py-2 flex gap-2">
-                           <button onClick={() => handleAddItem('materiales')} className="p-2 text-sipo-green"><Check size={18}/></button>
-                           <button onClick={() => setNewItem({tipo:null})} className="p-2 text-sipo-red"><X size={18}/></button>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )}
+                {materiales.map((m, i) => (
+                  <tr key={i} className="hover:bg-sipo-surface">
+                    <td className="px-6 py-3 font-medium">{m.recursos?.nombre}</td>
+                    <td className="px-6 py-3 text-center">{m.recursos?.unidad}</td>
+                    <td className="px-6 py-3 text-right">
+                      <input type="number" className="w-20 p-1 border border-transparent hover:border-sipo-border focus:border-sipo-orange rounded text-right bg-transparent outline-none" value={m.cantidad} onChange={(e) => handleChangeItem(m.id, 'cantidad', e.target.value)} onBlur={(e) => handleUpdateItem(m.id, 'cantidad', e.target.value)} />
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <input type="number" className="w-28 p-1 border border-transparent hover:border-sipo-border focus:border-sipo-orange rounded text-right bg-transparent outline-none" value={m.precio_unitario} onChange={(e) => handleChangeItem(m.id, 'precio_unitario', e.target.value)} onBlur={(e) => handleUpdateItem(m.id, 'precio_unitario', e.target.value)} />
+                    </td>
+                    <td className="px-6 py-3 text-right font-bold">{formatCOP(Number(m.cantidad) * Number(m.precio_unitario))}</td>
+                    <td className="px-6 py-3 text-center">
+                      <button onClick={() => handleRemove(m.id)} className="text-sipo-red p-1.5 rounded-lg hover:bg-sipo-red-bg transition-colors"><Trash2 size={16}/></button>
+                    </td>
+                  </tr>
+                ))}
+                {newItem.tipo === 'materiales' && renderAutocompleteRow('materiales')}
               </tbody>
             </table>
           </section>
 
           {/* HERRAMIENTAS */}
-          <section className="bg-white rounded-xl border border-sipo-border shadow-sm overflow-hidden animate-fade-in">
-            <TableHeader icon={Wrench} title="Herramientas" onAdd={() => setNewItem({tipo: 'herramientas', nombre: '', unidad: '', cantidad: 0, precio: 0})} />
+          <section className="bg-white rounded-xl border border-sipo-border shadow-sm overflow-visible">
+            {renderTableHeader(Wrench, "Herramientas", () => setNewItem({tipo: 'herramientas', nombre: '', unidad: '', cantidad: 0, precio: 0}))}
             <table className="w-full text-left text-[13px]">
               <thead className="bg-sipo-surface border-b border-sipo-border">
                 <tr className="text-[10px] uppercase font-bold text-sipo-slate">
                   <th className="px-6 py-3">Nombre</th>
-                  <th className="px-6 py-3 text-center">Unidad</th>
-                  <th className="px-6 py-3 text-right">Cantidad</th>
+                  <th className="px-6 py-3 text-center">Und</th>
+                  <th className="px-6 py-3 text-right">Cant</th>
                   <th className="px-6 py-3 text-right">V. Unit</th>
-                  <th className="px-6 py-3 text-right text-sipo-orange">Subtotal</th>
-                  <th className="px-6 py-3 text-center">Acción</th>
+                  <th className="px-6 py-3 text-right">Total</th>
+                  <th className="px-6 py-3 text-center"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-sipo-border">
-                {herramientas.length === 0 && newItem.tipo !== 'herramientas' ? (
-                  <tr><td colSpan="6" className="px-6 py-8 text-center text-sipo-slate-light italic">No hay herramientas agregadas</td></tr>
-                ) : (
-                  <>
-                    {herramientas.map((h, i) => (
-                      <tr key={i} className="hover:bg-sipo-surface">
-                        <td className="px-6 py-3 font-medium">{h.recursos?.nombre}</td>
-                        <td className="px-6 py-3 text-center">{h.recursos?.unidad}</td>
-                        <td className="px-6 py-3 text-right">{h.cantidad}</td>
-                        <td className="px-6 py-3 text-right">{formatCOP(h.precio_unitario)}</td>
-                        <td className="px-6 py-3 text-right font-bold">{formatCOP(parseNum(h.cantidad) * parseNum(h.precio_unitario))}</td>
-                        <td className="px-6 py-3 text-center">
-                           <button onClick={() => handleRemove(h.recurso_id)} className="text-sipo-red hover:bg-sipo-red-bg p-1.5 rounded-lg transition-colors"><Trash2 size={16}/></button>
-                        </td>
-                      </tr>
-                    ))}
-                    {newItem.tipo === 'herramientas' && (
-                      <tr className="bg-sipo-orange-bg/10 animate-fade-in">
-                        <td className="px-4 py-2"><input className="w-full p-2 rounded" placeholder="Herramienta..." value={newItem.nombre} onChange={e => setNewItem({...newItem, nombre: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-20"><input className="w-full p-2 rounded text-center" placeholder="Und" value={newItem.unidad} onChange={e => setNewItem({...newItem, unidad: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-24"><input type="number" className="w-full p-2 rounded text-right" value={newItem.cantidad} onChange={e => setNewItem({...newItem, cantidad: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-32"><input type="number" className="w-full p-2 rounded text-right" value={newItem.precio} onChange={e => setNewItem({...newItem, precio: e.target.value})} /></td>
-                        <td className="px-4 py-2 text-right font-bold">{formatCOP(newItem.cantidad * newItem.precio)}</td>
-                        <td className="px-4 py-2 flex gap-2">
-                           <button onClick={() => handleAddItem('herramienta')} className="p-2 text-sipo-green"><Check size={18}/></button>
-                           <button onClick={() => setNewItem({tipo:null})} className="p-2 text-sipo-red"><X size={18}/></button>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )}
+                {herramientas.map((h, i) => (
+                  <tr key={i} className="hover:bg-sipo-surface">
+                    <td className="px-6 py-3 font-medium">{h.recursos?.nombre}</td>
+                    <td className="px-6 py-3 text-center">{h.recursos?.unidad}</td>
+                    <td className="px-6 py-3 text-right">
+                      <input type="number" className="w-20 p-1 border border-transparent hover:border-sipo-border focus:border-sipo-orange rounded text-right bg-transparent outline-none" value={h.cantidad} onChange={(e) => handleChangeItem(h.id, 'cantidad', e.target.value)} onBlur={(e) => handleUpdateItem(h.id, 'cantidad', e.target.value)} />
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <input type="number" className="w-28 p-1 border border-transparent hover:border-sipo-border focus:border-sipo-orange rounded text-right bg-transparent outline-none" value={h.precio_unitario} onChange={(e) => handleChangeItem(h.id, 'precio_unitario', e.target.value)} onBlur={(e) => handleUpdateItem(h.id, 'precio_unitario', e.target.value)} />
+                    </td>
+                    <td className="px-6 py-3 text-right font-bold">{formatCOP(Number(h.cantidad) * Number(h.precio_unitario))}</td>
+                    <td className="px-6 py-3 text-center">
+                      <button onClick={() => handleRemove(h.id)} className="text-sipo-red p-1.5 rounded-lg hover:bg-sipo-red-bg transition-colors"><Trash2 size={16}/></button>
+                    </td>
+                  </tr>
+                ))}
+                {newItem.tipo === 'herramientas' && renderAutocompleteRow('herramientas')}
               </tbody>
             </table>
           </section>
 
           {/* EQUIPOS */}
-          <section className="bg-white rounded-xl border border-sipo-border shadow-sm overflow-hidden animate-fade-in">
-            <TableHeader icon={Hammer} title="Equipos" onAdd={() => setNewItem({tipo: 'equipos', nombre: '', unidad: '', cantidad: 0, precio: 0})} />
+          <section className="bg-white rounded-xl border border-sipo-border shadow-sm overflow-visible">
+            {renderTableHeader(Hammer, "Equipos", () => setNewItem({tipo: 'equipos', nombre: '', unidad: '', cantidad: 0, precio: 0}))}
             <table className="w-full text-left text-[13px]">
               <thead className="bg-sipo-surface border-b border-sipo-border">
                 <tr className="text-[10px] uppercase font-bold text-sipo-slate">
                   <th className="px-6 py-3">Nombre</th>
-                  <th className="px-6 py-3 text-center">Unidad</th>
-                  <th className="px-6 py-3 text-right">Cantidad</th>
+                  <th className="px-6 py-3 text-center">Und</th>
+                  <th className="px-6 py-3 text-right">Cant</th>
                   <th className="px-6 py-3 text-right">V. Unit</th>
-                  <th className="px-6 py-3 text-right text-sipo-orange">Subtotal</th>
-                  <th className="px-6 py-3 text-center">Acción</th>
+                  <th className="px-6 py-3 text-right">Total</th>
+                  <th className="px-6 py-3 text-center"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-sipo-border">
-                {equipos.length === 0 && newItem.tipo !== 'equipos' ? (
-                  <tr><td colSpan="6" className="px-6 py-8 text-center text-sipo-slate-light italic">No hay equipos agregados</td></tr>
-                ) : (
-                  <>
-                    {equipos.map((e, i) => (
-                      <tr key={i} className="hover:bg-sipo-surface">
-                        <td className="px-6 py-3 font-medium">{e.recursos?.nombre}</td>
-                        <td className="px-6 py-3 text-center">{e.recursos?.unidad}</td>
-                        <td className="px-6 py-3 text-right">{e.cantidad}</td>
-                        <td className="px-6 py-3 text-right">{formatCOP(e.precio_unitario)}</td>
-                        <td className="px-6 py-3 text-right font-bold">{formatCOP(parseNum(e.cantidad) * parseNum(e.precio_unitario))}</td>
-                        <td className="px-6 py-3 text-center">
-                           <button onClick={() => handleRemove(e.recurso_id)} className="text-sipo-red hover:bg-sipo-red-bg p-1.5 rounded-lg transition-colors"><Trash2 size={16}/></button>
-                        </td>
-                      </tr>
-                    ))}
-                    {newItem.tipo === 'equipos' && (
-                      <tr className="bg-sipo-orange-bg/10 animate-fade-in">
-                        <td className="px-4 py-2"><input className="w-full p-2 rounded" placeholder="Equipo..." value={newItem.nombre} onChange={e => setNewItem({...newItem, nombre: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-20"><input className="w-full p-2 rounded text-center" placeholder="Und" value={newItem.unidad} onChange={e => setNewItem({...newItem, unidad: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-24"><input type="number" className="w-full p-2 rounded text-right" value={newItem.cantidad} onChange={e => setNewItem({...newItem, cantidad: e.target.value})} /></td>
-                        <td className="px-4 py-2 w-32"><input type="number" className="w-full p-2 rounded text-right" value={newItem.precio} onChange={e => setNewItem({...newItem, precio: e.target.value})} /></td>
-                        <td className="px-4 py-2 text-right font-bold">{formatCOP(newItem.cantidad * newItem.precio)}</td>
-                        <td className="px-4 py-2 flex gap-2">
-                           <button onClick={() => handleAddItem('equipos')} className="p-2 text-sipo-green"><Check size={18}/></button>
-                           <button onClick={() => setNewItem({tipo:null})} className="p-2 text-sipo-red"><X size={18}/></button>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                )}
+                {equipos.map((e, i) => (
+                  <tr key={i} className="hover:bg-sipo-surface">
+                    <td className="px-6 py-3 font-medium">{e.recursos?.nombre}</td>
+                    <td className="px-6 py-3 text-center">{e.recursos?.unidad}</td>
+                    <td className="px-6 py-3 text-right">
+                      <input type="number" className="w-20 p-1 border border-transparent hover:border-sipo-border focus:border-sipo-orange rounded text-right bg-transparent outline-none" value={e.cantidad} onChange={(evt) => handleChangeItem(e.id, 'cantidad', evt.target.value)} onBlur={(evt) => handleUpdateItem(e.id, 'cantidad', evt.target.value)} />
+                    </td>
+                    <td className="px-6 py-3 text-right">
+                      <input type="number" className="w-28 p-1 border border-transparent hover:border-sipo-border focus:border-sipo-orange rounded text-right bg-transparent outline-none" value={e.precio_unitario} onChange={(evt) => handleChangeItem(e.id, 'precio_unitario', evt.target.value)} onBlur={(evt) => handleUpdateItem(e.id, 'precio_unitario', evt.target.value)} />
+                    </td>
+                    <td className="px-6 py-3 text-right font-bold">{formatCOP(Number(e.cantidad) * Number(e.precio_unitario))}</td>
+                    <td className="px-6 py-3 text-center">
+                      <button onClick={() => handleRemove(e.id)} className="text-sipo-red p-1.5 rounded-lg hover:bg-sipo-red-bg transition-colors"><Trash2 size={16}/></button>
+                    </td>
+                  </tr>
+                ))}
+                {newItem.tipo === 'equipos' && renderAutocompleteRow('equipos')}
               </tbody>
             </table>
           </section>
 
-          {/* CUADRILLA Y RENDIMIENTO */}
-          <section className="space-y-6">
-             <div className="bg-sipo-carbon p-5 rounded-t-2xl flex items-center gap-3 text-sipo-cream border-b-[4px] border-sipo-orange">
-              <Users size={22} className="text-sipo-orange" />
-              <div className="flex-1">
-                <h3 className="font-barlow font-bold uppercase tracking-wider text-lg">Cuadrilla y Rendimiento</h3>
-                <p className="text-[10px] text-sipo-slate-light font-bold uppercase tracking-widest leading-none">Mano de Obra y Productividad</p>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
-              {/* Selector de Cuadrilla */}
-              <div className="lg:col-span-2">
-                {cuadrillas.length === 0 ? (
-                  <div className="bg-white p-12 rounded-2xl border-2 border-dashed border-sipo-orange/30 flex flex-col items-center text-center space-y-4">
-                    <div className="w-16 h-16 bg-sipo-orange-bg rounded-full flex items-center justify-center">
-                      <Users size={32} className="text-sipo-orange" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sipo-carbon text-lg">No tienes cuadrillas creadas</h4>
-                      <p className="text-sipo-slate text-sm max-w-sm mt-1">Para calcular el costo de mano de obra en el APU, primero debes definir tus cuadrillas en el panel de configuración.</p>
-                    </div>
-                    <button 
-                      onClick={() => navigate('/configuracion?tab=cuadrillas')}
-                      className="bg-sipo-orange text-white font-bold py-3 px-8 rounded-xl shadow-lg shadow-sipo-orange/20 hover:scale-105 transition-all"
-                    >
-                      Ir a Configuración → Cuadrillas
-                    </button>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {cuadrillas.map(c => (
-                      <div 
-                        key={c.id}
-                        onClick={() => setSelectedCuadrilla(c)}
-                        className={`bg-white p-6 rounded-2xl border-2 transition-all cursor-pointer relative group ${
-                          selectedCuadrilla?.id === c.id 
-                            ? 'border-sipo-green bg-sipo-green-bg/5 shadow-md scale-[1.02]' 
-                            : 'border-sipo-border hover:border-sipo-orange/40 hover:shadow-sm'
-                        }`}
+          {/* CUADRILLAS (MANO DE OBRA) */}
+          <section className="bg-white rounded-xl border border-sipo-border shadow-sm overflow-visible">
+            {renderTableHeader(Users, "Mano de Obra (Cuadrillas)", () => setIsCreatingCuadrilla(true))}
+            <table className="w-full text-left text-[13px]">
+              <thead className="bg-sipo-surface border-b border-sipo-border">
+                <tr className="text-[10px] uppercase font-bold text-sipo-slate">
+                  <th className="px-6 py-3">Cuadrilla</th>
+                  <th className="px-6 py-3 text-right">Rendimiento (Und/Día)</th>
+                  <th className="px-6 py-3 text-right">Costo Diario</th>
+                  <th className="px-6 py-3 text-right">Costo Unitario</th>
+                  <th className="px-6 py-3 text-center"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-sipo-border">
+                {apuDetalles.filter(d => d.cuadrillas || d.cuadrilla_id).map((c, i) => (
+                  <tr key={i} className="hover:bg-sipo-surface">
+                    <td className="px-6 py-3 font-medium">{c.cuadrillas?.nombre || 'Cuadrilla'}</td>
+                    <td className="px-6 py-3 text-right">
+                      <input 
+                        type="number" 
+                        step="0.0001"
+                        className="w-24 p-1 border border-transparent hover:border-sipo-border focus:border-sipo-orange rounded text-right bg-transparent outline-none" 
+                        value={c.rendimiento} 
+                        onChange={(e) => handleChangeItem(c.id, 'rendimiento', e.target.value)} 
+                        onBlur={(e) => handleUpdateItem(c.id, 'rendimiento', e.target.value)} 
+                      />
+                    </td>
+                    <td className="px-6 py-3 text-right text-gray-500">{formatCOP(c.precio_unitario)}</td>
+                    <td className="px-6 py-3 text-right font-bold text-sipo-orange">
+                      {formatCOP(Number(c.precio_unitario) / (Number(c.rendimiento) || 1))}
+                    </td>
+                    <td className="px-6 py-3 text-center">
+                      <button onClick={() => handleRemove(c.id)} className="text-sipo-red p-1.5 rounded-lg hover:bg-sipo-red-bg transition-colors"><Trash2 size={16}/></button>
+                    </td>
+                  </tr>
+                ))}
+                
+                {/* Selector de cuadrilla existente */}
+                <tr className="bg-sipo-surface/50">
+                  <td className="px-6 py-3" colSpan="5">
+                    <div className="flex items-center gap-4">
+                      <select 
+                        className="flex-1 p-2 rounded border border-sipo-border bg-white outline-none focus:border-sipo-orange font-bold text-xs"
+                        onChange={(e) => {
+                          const c = cuadrillas.find(cuad => cuad.id === e.target.value);
+                          if (c) handleAddCuadrilla(c);
+                        }}
+                        value=""
                       >
-                        <div className="flex justify-between items-start mb-4">
-                          <div className={`p-2 rounded-lg transition-colors ${selectedCuadrilla?.id === c.id ? 'bg-sipo-green text-white' : 'bg-sipo-surface text-sipo-slate'}`}>
-                            <Users size={20} />
-                          </div>
-                          {selectedCuadrilla?.id === c.id && (
-                            <div className="p-1 bg-sipo-green rounded-full text-white">
-                              <Check size={14} />
-                            </div>
-                          )}
-                        </div>
-                        
-                        <h5 className="font-bold text-sipo-carbon text-lg leading-tight uppercase font-barlow italic">{c.nombre}</h5>
-                        <p className="text-[11px] text-sipo-slate mt-2 h-8 line-clamp-2 leading-relaxed">{c.descripcion || 'Sin descripción detallada'}</p>
-                        
-                        <div className="mt-6 pt-4 border-t border-sipo-border flex justify-between items-end">
-                          <div>
-                            <p className="text-[9px] uppercase font-bold text-sipo-slate-light tracking-widest">Costo total día</p>
-                            <p className={`font-barlow font-bold text-xl ${selectedCuadrilla?.id === c.id ? 'text-sipo-green' : 'text-sipo-carbon'}`}>
-                              {formatCOP(c.costo_diario)}
-                            </p>
-                          </div>
-                          <Link to="/configuracion?tab=cuadrillas" className="text-[10px] text-sipo-orange font-bold hover:underline opacity-0 group-hover:opacity-100 transition-opacity">Ver composición</Link>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Panel de Rendimiento */}
-              <div className="space-y-6">
-                {selectedCuadrilla ? (
-                  <div className="bg-sipo-carbon p-8 rounded-3xl shadow-xl space-y-8 animate-fade-in sticky top-[100px] border-b-[6px] border-sipo-green overflow-hidden relative">
-                    <div className="absolute top-0 right-0 p-10 opacity-5 -mr-5 -mt-5">
-                      <Users size={160} className="text-white" />
-                    </div>
-
-                    <div className="relative z-10 space-y-6">
-                      <div>
-                        <span className="text-[10px] font-bold uppercase tracking-[3px] text-sipo-green">Mano de Obra Seleccionada</span>
-                        <h4 className="text-2xl font-barlow font-bold text-white uppercase italic mt-1 leading-none">{selectedCuadrilla.nombre}</h4>
-                      </div>
+                        <option value="">+ Agregar cuadrilla del catálogo...</option>
+                        {cuadrillas.filter(c => !apuDetalles.some(d => d.cuadrilla_id === c.id)).map(c => (
+                          <option key={c.id} value={c.id}>{c.nombre} ({formatCOP(c.costo_diario)}/día)</option>
+                        ))}
+                      </select>
                       
-                      <div className="space-y-4">
-                        <label className="text-sipo-slate-light text-xs font-bold uppercase tracking-wider">Rendimiento (rendimiento diario)</label>
-                        <div className="relative">
-                          <input 
-                            type="number" 
-                            step="0.01"
-                            className="w-full p-5 bg-white/5 border-2 border-white/10 rounded-2xl focus:border-sipo-orange outline-none text-3xl font-barlow font-bold text-white transition-all"
-                            value={rendimiento}
-                            onChange={(e) => setRendimiento(Math.max(0.01, Number(e.target.value)))}
-                          />
-                          <span className="absolute right-6 top-1/2 -translate-y-1/2 text-sipo-slate-light font-bold text-lg">
-                            {partida?.unidad || 'm2'} / día
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-sipo-slate-light italic">¿Cuánta {partida?.unidad || 'm2'} hace esta cuadrilla en 8 horas?</p>
-                      </div>
+                      <button 
+                        onClick={() => setIsCreatingCuadrilla(true)}
+                        className="text-[10px] font-bold text-sipo-orange uppercase hover:underline"
+                      >
+                        Crear nueva cuadrilla
+                      </button>
+                    </div>
+                  </td>
+                </tr>
 
-                      <div className="pt-6 border-t border-white/10 space-y-4">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[11px] text-sipo-slate-light uppercase font-bold tracking-wider">Costo Día:</span>
-                          <span className="text-white font-medium">{formatCOP(selectedCuadrilla.costo_diario)}</span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-[11px] text-sipo-orange uppercase font-bold tracking-wider">Costo por {partida?.unidad || 'm2'}:</span>
-                          <span className="text-2xl font-barlow font-bold text-sipo-orange">{formatCOP(costoCuadrillaUnidad)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-sipo-surface p-10 rounded-3xl border-2 border-dashed border-sipo-border flex flex-col items-center text-center space-y-4 sticky top-[100px]">
-                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm">
-                      <Users size={32} className="text-sipo-slate-light" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-sipo-slate uppercase text-xs tracking-wider">Paso siguiente</p>
-                      <p className="text-sipo-slate-light text-sm mt-1">Selecciona una cuadrilla del panel izquierdo para calcular el rendimiento.</p>
-                    </div>
-                  </div>
+                {isCreatingCuadrilla && (
+                  <tr className="bg-sipo-orange-bg/10 border-2 border-sipo-orange/30">
+                    <td className="px-6 py-3">
+                      <input 
+                        type="text" 
+                        placeholder="Nombre (ej. Oficial + Ayudante)" 
+                        className="w-full p-2 rounded border border-sipo-border outline-none focus:border-sipo-orange font-bold text-xs"
+                        value={newCuadrilla.nombre}
+                        onChange={e => setNewCuadrilla({...newCuadrilla, nombre: e.target.value})}
+                      />
+                    </td>
+                    <td className="px-6 py-3" colSpan="2">
+                      <input 
+                        type="number" 
+                        placeholder="Costo Diario ($)" 
+                        className="w-full p-2 rounded border border-sipo-border outline-none focus:border-sipo-orange font-bold text-xs"
+                        value={newCuadrilla.costo_diario}
+                        onChange={e => setNewCuadrilla({...newCuadrilla, costo_diario: e.target.value})}
+                        onKeyDown={e => e.key === 'Enter' && handleCreateCuadrilla()}
+                      />
+                    </td>
+                    <td className="px-6 py-3"></td>
+                    <td className="px-6 py-3 flex gap-1">
+                       <button onClick={handleCreateCuadrilla} className="p-2 bg-sipo-green text-white rounded-lg"><Check size={16}/></button>
+                       <button onClick={() => setIsCreatingCuadrilla(false)} className="p-2 bg-white text-sipo-red border border-sipo-red rounded-lg"><X size={16}/></button>
+                    </td>
+                  </tr>
                 )}
-              </div>
-            </div>
+              </tbody>
+            </table>
           </section>
         </div>
 
-        {/* Footer calculado */}
-        <footer className="sticky bottom-4 left-0 right-0 z-20">
-          <div className="bg-sipo-carbon p-6 rounded-2xl shadow-2xl flex flex-col md:flex-row justify-between items-center border-b-[4px] border-sipo-orange">
+        <footer className="sticky bottom-4 z-[50]">
+          <div className="bg-sipo-carbon p-6 rounded-2xl shadow-2xl flex justify-between items-center border-b-[4px] border-sipo-orange">
             <div>
-              <p className="text-[10px] uppercase text-sipo-orange font-bold tracking-[2px]">Total APU consolidado</p>
-              <h2 className="text-4xl font-barlow font-bold text-white mt-1">
-                {formatCOP(totalAPUUnidad)} <span className="text-xl text-sipo-slate-light font-normal italic">{'por'} {partida?.unidad || 'm2'}</span>
-              </h2>
+              <p className="text-[10px] uppercase text-sipo-orange font-bold">Total Unitario</p>
+              <h2 className="text-4xl font-barlow font-bold text-white">{formatCOP(totalAPUUnidad)}</h2>
             </div>
-            <div className="flex gap-4 mt-6 md:mt-0">
-              <button 
-                onClick={handleSaveAPU}
-                className="group bg-white hover:bg-sipo-orange text-sipo-carbon hover:text-white font-bold py-4 px-10 rounded-xl flex items-center gap-3 transition-all active:scale-95"
-              >
-                Guardar APU
-                <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
+            <button onClick={handleSaveAPU} className="bg-white hover:bg-sipo-orange text-sipo-carbon hover:text-white font-bold py-4 px-10 rounded-xl transition-all">
+              Guardar y Continuar
+            </button>
           </div>
         </footer>
-
         {showToast && <Toast message={showToast.message} type={showToast.type} onClose={() => setShowToast(null)} />}
       </div>
     </div>
