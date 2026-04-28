@@ -52,11 +52,21 @@ const DashboardHome = () => {
         ]);
 
         if (obrasData.success) {
-          setObras(obrasData.data || []);
+          const listado = obrasData.data || [];
+          setObras(listado);
           
-          // Opcional: Si logras implementar el resumen en tu backend, descomenta esto:
-          // const resumenData = await authFetch(`/obras/resumen/${user.id}`);
-          // if (resumenData.success) setStats(resumenData.data);
+          // Calcular estadísticas desde el listado
+          const activas = listado.filter(o => o.estado === 'activo').length;
+          const pendientes = listado.filter(o => o.estado === 'borrador').length;
+          const finalizadas = listado.filter(o => o.estado === 'finalizado').length;
+          const totalPresupuesto = listado.reduce((acc, o) => acc + (Number(o.presupuesto_total) || 0), 0);
+          
+          setStats({
+            obras_activas: activas,
+            presupuesto_total: totalPresupuesto,
+            pendientes: pendientes,
+            finalizadas: finalizadas
+          });
         }
       } catch (err) {
         console.error('Error cargando dashboard:', err);

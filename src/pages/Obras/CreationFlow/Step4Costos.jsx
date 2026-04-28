@@ -27,10 +27,15 @@ const Step4Costos = () => {
   const [newItem, setNewItem] = useState({ concepto: '', descripcion: '', valor: 0 });
   const [editingId, setEditingId] = useState(null);
   
-  // Imprevistos y Utilidad
   const [porcentajes, setPorcentajes] = useState({
     imprevistos: 5,
     utilidad: 10
+  });
+
+  const [retenciones, setRetenciones] = useState({
+    retefuente: null,
+    ica: null,
+    iva: null
   });
 
   // Configuración Fiscal
@@ -72,7 +77,7 @@ const Step4Costos = () => {
       if (partidasData.success) {
         const partidas = partidasData.data?.partidas || partidasData.data || [];
         const totalDirecto = partidas.reduce((sum, p) => 
-          sum + ((Number(p.cantidad) || 0) * (Number(p.valor_unitario) || 0)), 0
+          sum + ((parseNum(p.cantidad) || 0) * (parseNum(p.valor_unitario) || 0)), 0
         );
         setCostoDirecto(totalDirecto);
       }
@@ -87,9 +92,19 @@ const Step4Costos = () => {
         
         const imp = costosData.data.find(c => c.tipo === 'imprevisto');
         const util = costosData.data.find(c => c.tipo === 'utilidad');
+        const rete = costosData.data.find(c => c.tipo === 'otro' && c.descripcion === 'retefuente');
+        const ica = costosData.data.find(c => c.tipo === 'otro' && c.descripcion === 'ica');
+        const iva = costosData.data.find(c => c.tipo === 'otro' && c.descripcion === 'iva');
+        
         setPorcentajes({
-          imprevistos: imp?.porcentaje || 5,
-          utilidad: util?.porcentaje || 10
+          imprevistos: imp?.porcentaje ?? 5,
+          utilidad: util?.porcentaje ?? 10
+        });
+
+        setRetenciones({
+          retefuente: rete?.porcentaje,
+          ica: ica?.porcentaje,
+          iva: iva?.porcentaje
         });
       }
       // Cargar configuración fiscal del usuario
@@ -158,7 +173,13 @@ const Step4Costos = () => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(porcentajes)
+        body: JSON.stringify({
+          imprevistos: porcentajes.imprevistos,
+          utilidad: porcentajes.utilidad,
+          retefuente: retenciones.retefuente ?? fiscalConfig.retencion_fuente ?? 0,
+          ica: retenciones.ica ?? fiscalConfig.ica_porcentaje ?? 0,
+          iva: retenciones.iva ?? fiscalConfig.iva_porcentaje ?? 19
+        })
       });
       fetchData(); // Recargar para ver el impacto en presupuesto_total
     } catch (err) {
@@ -185,7 +206,7 @@ const Step4Costos = () => {
   };
 
   // Cálculos en tiempo real basándose en lo que viene del backend y config fiscal
-  const totalAdministracion = (adminItems || []).reduce((sum, item) => sum + (Number(item.valor) || 0), 0);
+  const totalAdministracion = (adminItems || []).reduce((sum, item) => sum + (parseNum(item.valor) || 0), 0);
   const cd = Number(costoDirecto) || 0;
   const pImp = Number(porcentajes?.imprevistos) || 0;
   const pUtil = Number(porcentajes?.utilidad) || 0;
@@ -194,12 +215,16 @@ const Step4Costos = () => {
   const valorUtilidad = cd * (pUtil / 100);
   
   // Lógica fiscal
-  const ivaSobreUtilidad = valorUtilidad * ((fiscalConfig?.iva_porcentaje || 19) / 100);
+  const ivaCalc = retenciones.iva ?? fiscalConfig?.iva_porcentaje ?? 19;
+  const icaCalc = retenciones.ica ?? fiscalConfig?.ica_porcentaje ?? 0;
+  const reteCalc = retenciones.retefuente ?? fiscalConfig?.retencion_fuente ?? 0;
+
+  const ivaSobreUtilidad = valorUtilidad * (ivaCalc / 100);
   const totalSinRetenciones = cd + totalAdministracion + valorImprevistos + valorUtilidad + ivaSobreUtilidad;
   
-  const valorICA = totalSinRetenciones * ((fiscalConfig?.ica_porcentaje || 0) / 1000);
-  const valorReteICA = valorICA * ((fiscalConfig?.reteica_porcentaje || 0) / 100);
-  const valorRetefuente = totalSinRetenciones * ((fiscalConfig?.retencion_fuente || 0) / 100);
+  const valorICA = totalSinRetenciones * (icaCalc / 1000);
+  const valorReteICA = 0; // Se puede agregar lógica de ReteICA si se requiere luego
+  const valorRetefuente = totalSinRetenciones * (reteCalc / 100);
 
   const presupuestoTotal = totalSinRetenciones;
 
@@ -390,6 +415,50 @@ const Step4Costos = () => {
                  </div>
                </div>
             </div>
+
+            {/* Card Retenciones del Cliente (Específico de Obra) */}
+            <div className="bg-white rounded-2xl border border-sipo-border shadow-sm p-8 space-y-6">
+               <div>
+                 <h3 className="font-barlow font-bold text-xl text-sipo-carbon italic uppercase tracking-wide">Retenciones del Cliente</h3>
+                 <p className="text-xs text-sipo-slate mt-1">Ajusta los impuestos retenidos por este cliente específico. Si los dejas vacíos, se usarán los valores globales de tu configuración.</p>
+               </div>
+               
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase text-sipo-slate">Retención Fuente (%)</label>
+                    <input 
+                      type="number" step="0.1" 
+                      className="w-full p-2.5 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none text-sm font-medium"
+                      placeholder={String(fiscalConfig?.retencion_fuente || '0')}
+                      value={retenciones.retefuente ?? ''}
+                      onChange={e => setRetenciones({...retenciones, retefuente: e.target.value === '' ? null : Number(e.target.value)})}
+                      onBlur={updateAIU}
+                    />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase text-sipo-slate">ICA (‰ - x mil)</label>
+                    <input 
+                      type="number" step="0.1"
+                      className="w-full p-2.5 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none text-sm font-medium"
+                      placeholder={String(fiscalConfig?.ica_porcentaje || '0')}
+                      value={retenciones.ica ?? ''}
+                      onChange={e => setRetenciones({...retenciones, ica: e.target.value === '' ? null : Number(e.target.value)})}
+                      onBlur={updateAIU}
+                    />
+                 </div>
+                 <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase text-sipo-slate">IVA s/ Utilidad (%)</label>
+                    <input 
+                      type="number" step="1"
+                      className="w-full p-2.5 bg-sipo-surface border border-sipo-border rounded-xl focus:border-sipo-orange outline-none text-sm font-medium"
+                      placeholder={String(fiscalConfig?.iva_porcentaje || '19')}
+                      value={retenciones.iva ?? ''}
+                      onChange={e => setRetenciones({...retenciones, iva: e.target.value === '' ? null : Number(e.target.value)})}
+                      onBlur={updateAIU}
+                    />
+                 </div>
+               </div>
+            </div>
           </div>
 
           {/* Columna Derecha: Resumen */}
@@ -419,17 +488,17 @@ const Step4Costos = () => {
                 </div>
 
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-sipo-slate-light">IVA s/ Utilidad ({fiscalConfig?.iva_porcentaje || 0}%)</span>
+                  <span className="text-sipo-slate-light">IVA s/ Utilidad ({ivaCalc}%)</span>
                   <span className="text-sipo-cream font-medium">{formatCOP(ivaSobreUtilidad)}</span>
                 </div>
                 
                 <div className="pt-4 mt-4 border-t border-white/5 space-y-2">
                    <div className="flex justify-between items-center text-[11px]">
-                     <span className="text-gray-400">ICA Est. ({fiscalConfig?.ica_porcentaje || 0}‰)</span>
+                     <span className="text-gray-400">ICA Est. ({icaCalc}‰)</span>
                      <span className="text-gray-300">-{formatCOP(valorICA)}</span>
                    </div>
                    <div className="flex justify-between items-center text-[11px]">
-                     <span className="text-gray-400">ReteFuente Est. ({fiscalConfig?.retencion_fuente || 0}%)</span>
+                     <span className="text-gray-400">ReteFuente Est. ({reteCalc}%)</span>
                      <span className="text-gray-300">-{formatCOP(valorRetefuente)}</span>
                    </div>
                 </div>

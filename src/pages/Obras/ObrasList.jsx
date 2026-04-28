@@ -20,33 +20,23 @@ const ObrasList = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      console.log("🔍 [RENDER] ObrasList - Estado actual obras:", obras.length);
       const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
-      console.log("👤 [USER] ID buscado:", currentUser?.id);
-      
       if (!currentUser?.id) {
         setLoading(false);
         return;
       }
-
       try {
         const token = localStorage.getItem('token');
-        console.log("🌐 [FETCH] Llamando a API...");
         const response = await fetch(`http://localhost:3000/api/obras/usuario/${currentUser.id}`, {
           headers: { 'Authorization': `Bearer ${token}` }
         });
-        console.log("📡 [STATUS]:", response.status);
         const data = await response.json();
-        console.log("📦 [DATA RECEIVED]:", data);
         
         if ((data.success || data.data) && Array.isArray(data.data)) {
-          console.log("✅ [SUCCESS] Obras a setear:", data.data.length);
           setObras([...data.data]);
-        } else {
-          console.log("⚠️ [WARN] Backend respondió con formato inesperado:", data);
         }
       } catch (err) {
-        console.error('❌ [ERROR] Fallo carga:', err);
+        console.error('Error cargando obras:', err);
       } finally {
         setLoading(false);
       }
@@ -70,10 +60,15 @@ const ObrasList = () => {
     return 'bg-amber-50 text-amber-600 border-amber-200';
   };
 
-  const filteredObras = (obras || []).filter(o => 
-    (o.nombre || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (o.cliente?.nombre || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const [statusFilter, setStatusFilter] = useState('Todos');
+
+  const filteredObras = (obras || []).filter(o => {
+    const matchesSearch = (o.nombre || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         (o.cliente?.nombre || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusFilter === 'Todos' || 
+                         (o.estado || 'borrador').toLowerCase() === statusFilter.toLowerCase();
+    return matchesSearch && matchesStatus;
+  });
 
   return (
     <div className="space-y-6">
@@ -103,17 +98,18 @@ const ObrasList = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <select className="bg-sipo-surface border border-sipo-border px-4 py-2.5 rounded-xl text-sm font-medium outline-none focus:border-sipo-orange">
-          <option>Todos los estados</option>
-          <option>Activo</option>
-          <option>Pendiente</option>
-          <option>Finalizado</option>
+        <select 
+          className="bg-sipo-surface border border-sipo-border px-4 py-2.5 rounded-xl text-sm font-medium outline-none focus:border-sipo-orange"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          <option value="Todos">Todos los estados</option>
+          <option value="activo">Activo</option>
+          <option value="borrador">Borrador</option>
+          <option value="finalizado">Finalizado</option>
         </select>
       </div>
 
-      <div className="bg-sipo-orange/10 p-2 rounded text-xs font-bold text-sipo-orange mb-4">
-        DEBUG: {obras.length} obras encontradas en memoria.
-      </div>
 
       {loading ? (
         <div className="py-20 flex flex-col items-center gap-4">

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Loader2, Plus, Trash2, Edit3, X } from 'lucide-react';
 import TabProgreso from '../../../components/TabProgreso';
-import { formatCOP } from '../../../utils/format';
+import { formatCOP, parseNum } from '../../../utils/format';
 import { authFetch } from '../../../services/apiFetch';
 
 const Step2Partidas = () => {
@@ -45,8 +45,8 @@ const Step2Partidas = () => {
       const dataToSend = {
         nombre: formData.nombre,
         unidad: formData.unidad,
-        cantidad: Number(formData.cantidad),
-        valor_unitario: Number(formData.valor_unitario),
+        cantidad: parseNum(formData.cantidad),
+        valor_unitario: parseNum(formData.valor_unitario),
         descripcion: formData.descripcion || '',
         obra_id: id
       };
@@ -114,8 +114,14 @@ const Step2Partidas = () => {
                     <td className="p-4 font-semibold text-gray-700">{p.nombre}</td>
                     <td className="p-4 text-gray-600">{p.unidad}</td>
                     <td className="p-4 text-gray-600">{p.cantidad}</td>
-                    <td className="p-4 text-gray-600">{formatCOP(p.valor_unitario)}</td>
-                    <td className="p-4 font-bold text-gray-800">{formatCOP(p.cantidad * p.valor_unitario)}</td>
+                    <td className="p-4 text-gray-600">
+                      {p.valor_unitario > 0 ? formatCOP(p.valor_unitario) : (
+                        <span className="text-xs text-orange-500 font-medium italic">Pendiente APU</span>
+                      )}
+                    </td>
+                    <td className="p-4 font-bold text-gray-800">
+                      {p.valor_unitario > 0 ? formatCOP(p.cantidad * p.valor_unitario) : '$ —'}
+                    </td>
                     <td className="p-4 flex justify-center gap-3">
                       <button onClick={() => startEdit(p)} className="text-blue-500"><Edit3 size={18} /></button>
                       <button onClick={() => handleDelete(p.id)} className="text-red-500"><Trash2 size={18} /></button>
@@ -188,15 +194,17 @@ const Step2Partidas = () => {
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] uppercase font-bold text-gray-400">Cantidad</label>
-                  <input type="number" step="0.01" placeholder="0.00" className="w-full mt-1 p-3 border rounded-xl" required value={formData.cantidad} onChange={e => setFormData({ ...formData, cantidad: e.target.value })} />
+                   <label className="text-[10px] uppercase font-bold text-gray-400">Cantidad</label>
+                   <input type="number" step="0.01" placeholder="0.00" className="w-full mt-1 p-3 border rounded-xl" required value={formData.cantidad} onChange={e => setFormData({ ...formData, cantidad: e.target.value })} />
+                   <p className="text-[9px] text-gray-400 mt-1 italic">Volumen total de obra.</p>
                 </div>
               </div>
 
-              <div>
-                <label className="text-[10px] uppercase font-bold text-gray-400">Valor Unitario (Estimado)</label>
-                <input type="number" placeholder="0" className="w-full mt-1 p-3 border rounded-xl font-bold text-orange-600" required value={formData.valor_unitario} onChange={e => setFormData({ ...formData, valor_unitario: e.target.value })} />
-              </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-gray-400">Valor Unitario (Estimado)</label>
+                  <input type="number" placeholder="0" className="w-full mt-1 p-3 border rounded-xl font-bold text-orange-600" required value={formData.valor_unitario} onChange={e => setFormData({ ...formData, valor_unitario: e.target.value })} />
+                  <p className="text-[9px] text-gray-400 mt-1 italic">Este es el precio de <b>una sola unidad</b>. Se multiplicará por la cantidad automáticamente.</p>
+                </div>
               
               <button type="submit" className="w-full bg-orange-500 text-white py-4 rounded-xl font-bold shadow-lg shadow-orange-200 active:scale-95 transition-all mt-4">
                 {isEditing ? 'Actualizar Partida' : 'Crear Partida'}

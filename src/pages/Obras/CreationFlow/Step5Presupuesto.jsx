@@ -13,6 +13,7 @@ import {
 import TabProgreso from '../../../components/TabProgreso';
 import Toast from '../../../components/Toast';
 import { formatCOP, parseNum } from '../../../utils/format';
+import { generateProfessionalPDF } from '../../../utils/pdfGenerator';
 
 const Step5Presupuesto = () => {
   const navigate = useNavigate();
@@ -27,6 +28,7 @@ const Step5Presupuesto = () => {
     reteica_porcentaje: 0,
     retencion_fuente: 0
   });
+  const [empresa, setEmpresa] = useState(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -48,6 +50,15 @@ const Step5Presupuesto = () => {
           });
           const fiscalData = await fiscalRes.json();
           if (fiscalData.success) setFiscalConfig(fiscalData.data);
+
+          // Cargar datos de empresa
+          const empRes = await fetch(`http://localhost:3000/api/empresa-config/usuario/${user.id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (empRes.ok) {
+            const empData = await empRes.json();
+            if (empData.success) setEmpresa(empData.data);
+          }
         }
       } catch (err) {
         console.error('Error cargando presupuesto:', err);
@@ -112,32 +123,67 @@ const Step5Presupuesto = () => {
     window.print();
   };
 
+
   // Valores calculados desde los datos reales de la obra
   const costoDirecto = obra?.total_directo || 0;
   
   // Obtener costos indirectos reales
   const costosInd = obra?.costos_indirectos || [];
   const adminItems = costosInd.filter(c => c.tipo === 'administracion');
-  const adminVal = adminItems.reduce((sum, c) => sum + (Number(c.valor) || 0), 0);
+  const adminVal = adminItems.reduce((sum, c) => sum + (parseNum(c.valor) || 0), 0);
   
   const impObj = costosInd.find(c => c.tipo === 'imprevisto');
   const utilObj = costosInd.find(c => c.tipo === 'utilidad');
+  const reteObj = costosInd.find(c => c.tipo === 'otro' && c.descripcion === 'retefuente');
+  const icaObj = costosInd.find(c => c.tipo === 'otro' && c.descripcion === 'ica');
+  const ivaObj = costosInd.find(c => c.tipo === 'otro' && c.descripcion === 'iva');
   
   const pImp = impObj ? (impObj.porcentaje || 0) : 0;
   const pUtil = utilObj ? (utilObj.porcentaje || 0) : 0;
   
+  const ivaCalc = ivaObj?.porcentaje ?? fiscalConfig?.iva_porcentaje ?? 19;
+  const icaCalc = icaObj?.porcentaje ?? fiscalConfig?.ica_porcentaje ?? 0;
+  const reteCalc = reteObj?.porcentaje ?? fiscalConfig?.retencion_fuente ?? 0;
+
   const imprevistos = costoDirecto * (pImp / 100);
   const utilidad = costoDirecto * (pUtil / 100);
   
   const subtotalAIU = adminVal + imprevistos + utilidad;
-  const ivaSobreUtilidad = utilidad * ((fiscalConfig?.iva_porcentaje || 19) / 100);
+  const ivaSobreUtilidad = utilidad * (ivaCalc / 100);
   
   const totalConIVA = costoDirecto + subtotalAIU + ivaSobreUtilidad;
   
-  const valorICA = totalConIVA * ((fiscalConfig?.ica_porcentaje || 0) / 1000);
-  const valorRetefuente = totalConIVA * ((fiscalConfig?.retencion_fuente || 0) / 100);
+  const valorICA = totalConIVA * (icaCalc / 1000);
+  const valorRetefuente = totalConIVA * (reteCalc / 100);
   
   const totalGral = totalConIVA;
+
+  // ─── PDF Generator (needs calculated values above) ───────────────────────
+  const handleDownloadPDF = () => {
+    try {
+      setShowToast({ message: 'Generando PDF...', type: 'info' });
+      const totalesParaPDF = {
+        costoDirecto,
+        adminVal,
+        imprevistos,
+        utilidad,
+        ivaSobreUtilidad,
+        totalGral,
+        pImp,
+        pUtil,
+        ivaCalc,
+        icaCalc,
+        reteCalc,
+        valorICA,
+        valorRetefuente
+      };
+      generateProfessionalPDF(obra, totalesParaPDF, detailLevel, empresa);
+      setShowToast({ message: '¡PDF descargado!', type: 'success' });
+    } catch (error) {
+      console.error('Error generando PDF:', error);
+      setShowToast({ message: `Error: ${error.message}`, type: 'error' });
+    }
+  };
 
   const handleSaveDraft = async () => {
     try {
@@ -195,7 +241,7 @@ const Step5Presupuesto = () => {
         <TabProgreso currentStep={5} />
       </div>
 
-      <div className="max-w-[1000px] mx-auto space-y-10">
+      <div className="max-w-[1000px] mx-auto space-y-10 print:max-w-none print:w-full print:m-0 print:p-0 print:space-y-6">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <Link to={`/obras/${id}/costos`} className="text-xs font-bold text-sipo-orange flex items-center gap-1 mb-2 hover:underline print:hidden">
@@ -216,11 +262,11 @@ const Step5Presupuesto = () => {
                className="bg-sipo-green text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-sipo-green/20 flex items-center gap-2 hover:bg-green-700 transition-all"
              >
                 <Send size={18} />
-                Enviar al cliente
+                Enviar al Cliente
              </button>
              <button 
                onClick={handleFinalize}
-               className="bg-sipo-orange text-white font-bold px-6 py-3 rounded-xl shadow-lg shadow-sipo-orange/20 flex items-center gap-2 hover:bg-sipo-orange-dark transition-all"
+               className="bg-sipo-carbon text-white font-bold px-6 py-3 rounded-xl shadow-lg flex items-center gap-2 hover:bg-gray-800 transition-all"
              >
                 <CheckCircle2 size={18} />
                 Finalizar Obra
@@ -254,7 +300,7 @@ const Step5Presupuesto = () => {
         </div>
 
         {/* Selector de nivel de detalle */}
-        <section className="space-y-4">
+        <section className="space-y-4 print:hidden">
            <div className="flex items-center gap-2">
              <Printer size={18} className="text-sipo-orange" />
              <label>Configuración de exportación (Nivel de detalle)</label>
@@ -282,7 +328,7 @@ const Step5Presupuesto = () => {
         </section>
 
         {/* Tabla completa de presupuesto */}
-        <div className="bg-white rounded-3xl border border-sipo-border shadow-sm overflow-hidden">
+        <div className="bg-white rounded-3xl border border-sipo-border shadow-sm overflow-hidden print:border-none print:shadow-none print:rounded-none">
           <table className="w-full text-left text-[13px] border-collapse">
             <thead>
               <tr className="bg-sipo-surface border-b border-sipo-border">
@@ -310,7 +356,7 @@ const Step5Presupuesto = () => {
               {/* VISTA POR PARTIDAS O APU */}
               {detailLevel !== 'ejecutivo' && obra?.partidas?.map((p, index) => (
                 <React.Fragment key={p.id}>
-                  <tr className="hover:bg-gray-50/50 transition-colors">
+                  <tr className="hover:bg-gray-50/50 transition-colors print:break-inside-avoid">
                     <td className="px-8 py-4 font-bold text-sipo-orange">{(index + 1).toString().padStart(2, '0')}</td>
                     <td className="px-8 py-4 font-bold text-sipo-carbon uppercase tracking-tight">{p.nombre}</td>
                     <td className="px-4 py-4 text-center text-sipo-slate">{p.unidad}</td>
@@ -321,7 +367,7 @@ const Step5Presupuesto = () => {
                   
                   {/* DESGLOSE APU (Solo si está seleccionado 'apu') */}
                   {detailLevel === 'apu' && p.apu_detalle?.map((d) => (
-                    <tr key={d.id} className="bg-gray-50/30 text-[11px] text-sipo-slate italic">
+                    <tr key={d.id} className="bg-gray-50/30 text-[11px] text-sipo-slate italic print:break-inside-avoid">
                       <td className="px-8"></td>
                       <td className="px-8 py-2 border-l-2 border-sipo-orange/20 ml-4">
                         ↳ {d.recursos?.nombre || d.cuadrillas?.nombre} 
@@ -346,7 +392,7 @@ const Step5Presupuesto = () => {
               
               {/* Administración */}
               <tr className="bg-sipo-orange-bg/10 border-white">
-                <td colSpan="5" className="px-8 py-3 text-right uppercase tracking-[2px] text-sipo-orange-dark text-[11px] font-bold">Administración Desglosada</td>
+                <td colSpan="5" className="px-8 py-3 text-right uppercase tracking-[2px] text-sipo-orange-dark text-[11px] font-bold">Administración Detallada</td>
                 <td className="px-8 py-3 text-right text-sipo-orange font-bold">{formatCOP(adminVal)}</td>
               </tr>
               
@@ -360,17 +406,17 @@ const Step5Presupuesto = () => {
                 <td className="px-8 py-3 text-right text-sipo-carbon font-medium">{formatCOP(utilidad)}</td>
               </tr>
               <tr>
-                <td colSpan="5" className="px-8 py-3 text-right uppercase tracking-wider text-sipo-slate text-[11px] font-bold italic">IVA sobre Utilidad ({fiscalConfig?.iva_porcentaje || 0}%)</td>
+                <td colSpan="5" className="px-8 py-3 text-right uppercase tracking-wider text-sipo-slate text-[11px] font-bold italic">IVA sobre Utilidad ({ivaCalc}%)</td>
                 <td className="px-8 py-3 text-right text-sipo-carbon font-medium">{formatCOP(ivaSobreUtilidad)}</td>
               </tr>
               
               {/* Retenciones informativas */}
               <tr className="bg-gray-50/50">
-                <td colSpan="5" className="px-8 py-2 text-right text-[10px] text-gray-400 italic">ICA Estimado ({fiscalConfig?.ica_porcentaje || 0}‰)</td>
+                <td colSpan="5" className="px-8 py-2 text-right text-[10px] text-gray-400 italic">ICA Estimado ({icaCalc}‰)</td>
                 <td className="px-8 py-2 text-right text-[10px] text-gray-400">-{formatCOP(valorICA)}</td>
               </tr>
               <tr className="bg-gray-50/50">
-                <td colSpan="5" className="px-8 py-2 text-right text-[10px] text-gray-400 italic">Retefuente Estimada ({fiscalConfig?.retencion_fuente || 0}%)</td>
+                <td colSpan="5" className="px-8 py-2 text-right text-[10px] text-gray-400 italic">Retefuente Estimada ({reteCalc}%)</td>
                 <td className="px-8 py-2 text-right text-[10px] text-gray-400">-{formatCOP(valorRetefuente)}</td>
               </tr>
 
@@ -388,8 +434,8 @@ const Step5Presupuesto = () => {
           
           <div className="p-8 flex justify-center bg-white">
              <button 
-               onClick={handlePrint}
-               className="bg-sipo-orange hover:bg-sipo-orange-dark text-white font-bold py-4 px-12 rounded-2xl flex items-center gap-3 transition-all shadow-xl shadow-sipo-orange/30 active:scale-95 text-lg print:hidden"
+               onClick={handleDownloadPDF}
+               className="bg-sipo-orange hover:bg-sipo-orange-dark text-white font-bold py-4 px-12 rounded-2xl flex items-center gap-3 transition-all shadow-xl shadow-sipo-orange/30 active:scale-95 text-lg"
              >
                 <Download size={22} />
                 Descargar PDF Oficial
